@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MaruDoc | Convert and edit documents without leaving Finder</title>
+<meta name="description" content="A Mac app that converts and edits PDF, Word and image files from Finder and the desktop. Your files never leave your Mac.">
+<link rel="canonical" href="https://marudoc.app/en/">
+<meta property="og:title" content="MaruDoc | Convert and edit documents without leaving Finder">
+<meta property="og:description" content="A Mac app that converts and edits PDF, Word and image files from Finder and the desktop. Your files never leave your Mac.">
+<meta property="og:url" content="https://marudoc.app/en/">
+<meta property="og:image" content="https://marudoc.app/img/icon.png">
+<link rel="icon" href="../img/favicon.png">
+<link rel="alternate" hreflang="ja" href="../">
+<link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
+<style>
+  :root { --bg: #fbfbfd; --text: #1d1d1f; --sub: #6e6e73; --line: #d2d2d7; --accent: #0066cc; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161617; --text: #f5f5f7; --sub: #a1a1a6; --line: #3a3a3c; --accent: #2997ff; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 720px; margin: 0 auto; padding: 0 20px 96px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 20px 0 0; font-size: 14px; }
+  header .name { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text); text-decoration: none; }
+  header img { width: 28px; height: 28px; }
+  header nav a { color: var(--sub); text-decoration: none; margin-left: 18px; }
+  header nav a:hover { color: var(--text); }
+  h1 { font-size: 36px; line-height: 1.2; letter-spacing: -0.015em; margin: 72px 0 16px; font-weight: 700; }
+  h2 { font-size: 22px; margin: 72px 0 12px; font-weight: 700; }
+  h3 { font-size: 17px; margin: 28px 0 4px; }
+  p { margin: 0 0 14px; }
+  .lead { font-size: 19px; color: var(--sub); }
+  .download { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin: 28px 0 8px; }
+  .button { display: inline-block; background: var(--accent); color: #fff; text-decoration: none; padding: 11px 22px; border-radius: 980px; font-weight: 600; font-size: 15px; }
+  .note { font-size: 13px; color: var(--sub); }
+  figure { margin: 56px 0 0; text-align: center; }
+  figure img { width: 100%; max-width: 440px; height: auto; border-radius: 12px; }
+  figcaption { font-size: 13px; color: var(--sub); margin-top: 8px; }
+  .dark-only { display: none; }
+  @media (prefers-color-scheme: dark) { .dark-only { display: inline; } .light-only { display: none; } }
+  ol { padding-left: 1.3em; } li { margin-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; margin: 8px 0 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; white-space: nowrap; padding-right: 18px; }
+  code { font: 13.5px ui-monospace, Menlo, monospace; background: rgba(127,127,127,.12); padding: 1px 5px; border-radius: 4px; }
+  a { color: var(--accent); }
+  .cmd { display: flex; align-items: center; gap: 10px; margin: 8px 0 14px; }
+  .cmd pre { flex: 1; margin: 0; padding: 10px 12px; overflow-x: auto; border-radius: 6px; background: rgba(127,127,127,.12); font: 13.5px/1.6 ui-monospace, Menlo, monospace; }
+  .cmd button { font: inherit; font-size: 13px; color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+  footer { margin-top: 96px; font-size: 13px; color: var(--sub); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="name" href="./"><img src="../img/icon.png" alt="">MaruDoc</a>
+    <nav><a href="#how">How it works</a><a href="#formats">Formats</a><a href="#privacy">Privacy</a><a href="../">日本語</a></nav>
+  </header>
+
+  <h1>Convert and edit PDF and Word files without leaving Finder.</h1>
+  <p class="lead">Right-click a file, or press and hold it on the desktop, to convert or edit it. Everything runs on your Mac. MaruDoc never sends your files anywhere.</p>
+
+  <div class="download">
+    <a class="button" href="../MaruDoc.dmg">Download for Mac</a>
+    <span class="note">Version 1.0.0 · macOS 14 or later · Apple silicon and Intel · Free<br>The Mac App Store version is in preparation.</span>
+  </div>
+
+  <h2 id="terminal">Install from Terminal</h2>
+  <div class="cmd"><pre>curl -fsSL https://marudoc.app/install.sh | sh</pre><button type="button" data-done="Copied">Copy</button></div>
+  <p>This downloads the same notarized DMG as the button above and checks its signature before installing. You can read the script at <a href="/install.sh">install.sh</a>.</p>
+  <p>To have an AI agent do it, tell it to install MaruDoc and run this command. The permissions have to be turned on by you in System Settings.</p>
+  <p class="note">Uninstall</p>
+  <div class="cmd"><pre>curl -fsSL https://marudoc.app/install.sh | sh -s -- --uninstall</pre><button type="button" data-done="Copied">Copy</button></div>
+
+  <figure>
+    <img class="light-only" src="../img/radial-light.png" alt="The radial menu that appears when you press and hold a PDF on the desktop.">
+    <img class="dark-only" src="../img/radial-dark.png" alt="">
+    <figcaption>Pressing and holding a PDF on the desktop. The outer ring shows Excel and PowerPoint next to Word.</figcaption>
+  </figure>
+
+  <h2 id="how">How it works</h2>
+  <ol>
+    <li>Right-click a file and choose MaruDoc. Only the actions that make sense for that file are listed.</li>
+    <li>Press and hold a file on the desktop. A ring of actions appears around the pointer; slide toward one and let go. Items with more choices open a larger outer ring. Let go in the centre and the menu stays open so you can click instead.</li>
+    <li>Hands-on work such as cropping or marking up opens a small editor right next to the file.</li>
+  </ol>
+  <p>Results are saved next to the original, and on the desktop they appear beside the original icon. Nothing is ever overwritten by a conversion, and in-place changes such as rotating can be undone right away.</p>
+
+  <h2 id="formats">What it does</h2>
+  <table>
+    <tr><th>PDF</th><td>To Word, Excel, PowerPoint, images (PNG / JPEG / HEIC / TIFF), Markdown, text, HTML, RTF. Add and fix text, highlight, draw, shapes, white-out, redact, notes, signatures, crop, rotate / delete / reorder pages, combine, split, compress, OCR, passwords, page numbers, watermarks</td></tr>
+    <tr><th>Images</th><td>To PDF, PNG, JPEG, HEIC, TIFF. Crop, rotate, resize, compress, remove background, recognise text, remove location data, adjust, mark up</td></tr>
+    <tr><th>Word</th><td>To PDF, Markdown, text, HTML, RTF, images. Edit with formatting</td></tr>
+    <tr><th>Markdown, text, HTML</th><td>To PDF, Word, each other, images. Edit in place</td></tr>
+    <tr><th>Excel, CSV</th><td>CSV and Excel both ways, PDF, Markdown tables, HTML, Word</td></tr>
+    <tr><th>PowerPoint</th><td>Text and images to PDF, Word, Markdown. Extract images</td></tr>
+    <tr><th>Several files</th><td>Combine PDFs and images into one PDF in the order you selected them, split PDFs (every page, by ranges, every N pages), convert / compress / resize in bulk</td></tr>
+  </table>
+
+  <h2 id="privacy">Privacy</h2>
+  <p>MaruDoc contains no networking code. Conversion, editing, text recognition and background removal all use frameworks built into macOS and run on your Mac. MaruDoc collects no usage data.</p>
+  <p>The Mac App Store version runs in the App Sandbox without network permission, so macOS itself guarantees it cannot connect. You can inspect the downloaded app's entitlements with <code>codesign -d --entitlements - /Applications/MaruDoc.app</code>.</p>
+
+  <h2>Setup</h2>
+  <p>MaruDoc walks you through this on first launch. For the right-click menu, turn on MaruDoc under System Settings, General, Login Items &amp; Extensions, Finder. For the press-and-hold menu, turn on MaruDoc under Privacy &amp; Security, Accessibility. Accessibility is used only to find the file you pressed and to follow the pointer.</p>
+
+  <footer>© 2026 Yitao Ding · <a href="privacy/">Privacy Policy</a></footer>
+</main>
+<script>
+document.querySelectorAll('.cmd button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var t = b.parentNode.querySelector('pre').textContent.trim();
+    var done = function () { var o = b.textContent; b.textContent = b.dataset.done; setTimeout(function () { b.textContent = o; }, 1500); };
+    if (navigator.clipboard) { navigator.clipboard.writeText(t).then(done); }
+  });
+});
+</script>
+</body>
+</html>

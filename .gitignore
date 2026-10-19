@@ -1,0 +1,36 @@
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj
+xcuserdata/
+DerivedData/
+
+# Build output of scripts/build_app.sh and release.sh
+/build/
+
+# Release artifacts
+*.dmg
+*.pkg
+*.zip
+*.app
+
+# Signing material and credentials
+*.p8
+*.p12
+*.cer
+*.certSigningRequest
+*.provisionprofile
+*.mobileprovision
+AuthKey_*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editors
+.idea/
+.vscode/
+*.swp

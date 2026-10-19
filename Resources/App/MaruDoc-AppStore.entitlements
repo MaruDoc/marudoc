@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Mac App Store build. Note: no com.apple.security.network.client / server: the OS blocks all networking. -->
+	<key>com.apple.security.app-sandbox</key><true/>
+	<key>com.apple.security.files.user-selected.read-write</key><true/>
+	<key>com.apple.security.files.bookmarks.app-scope</key><true/>
+	<key>com.apple.security.automation.apple-events</key><true/>
+	<key>com.apple.security.temporary-exception.apple-events</key>
+	<array><string>com.apple.finder</string></array>
+	<!-- Shared with the Finder extension: carries the token that authenticates marudoc://run requests. -->
+	<key>com.apple.security.application-groups</key>
+	<array><string>FC2V887B8C.app.marudoc</string></array>
+</dict>
+</plist>

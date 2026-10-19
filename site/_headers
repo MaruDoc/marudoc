@@ -1,0 +1,13 @@
+/*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+/MaruDoc.dmg
+  Content-Type: application/x-apple-diskimage
+  Content-Disposition: attachment; filename="MaruDoc.dmg"
+/install.sh
+  Content-Type: text/plain; charset=utf-8
+/llms.txt
+  Content-Type: text/plain; charset=utf-8

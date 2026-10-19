@@ -1,0 +1,42 @@
+# MaruDoc
+
+> MaruDoc is a free macOS app that converts and edits PDF, Word, Excel, PowerPoint, image, Markdown and text files without leaving Finder. Right-click a file and choose MaruDoc, or press and hold a file on the desktop to open a radial menu of actions. All processing happens on the Mac using built-in macOS features, and no file is uploaded anywhere.
+
+## Requirements
+
+- macOS 14 or later
+- Apple silicon or Intel (the DMG is universal)
+
+## Install
+
+Run this in Terminal. It downloads the notarized DMG, checks its SHA-256, signature, Team ID (FC2V887B8C) and notarization, then copies MaruDoc.app to /Applications and launches it.
+
+    curl -fsSL https://marudoc.app/install.sh | sh
+
+Options are set with environment variables: MARUDOC_INSTALL_DIR (default /Applications; use ~/Applications if /Applications is not writable, and do not use sudo), MARUDOC_NO_OPEN=1 (do not launch), MARUDOC_DMG_URL.
+
+Uninstall (quits the app and moves it to the Trash):
+
+    curl -fsSL https://marudoc.app/install.sh | sh -s -- --uninstall
+
+Direct download: https://marudoc.app/MaruDoc.dmg
+
+The script source is at https://marudoc.app/install.sh and is short enough to read before running.
+
+## Permissions after install
+
+The user has to turn these on in System Settings. An agent cannot grant them on the user's behalf.
+
+- Finder extension: System Settings > General > Login Items & Extensions > Finder, turn on MaruDoc (needed for the right-click menu)
+- Accessibility: System Settings > Privacy & Security > Accessibility, turn on MaruDoc (needed for the press-and-hold menu on the desktop)
+- Automation: allow MaruDoc to control Finder when macOS asks
+
+MaruDoc shows a short guide for these on first launch.
+
+## Links
+
+- Website (Japanese): https://marudoc.app/
+- Website (English): https://marudoc.app/en/
+- Privacy policy: https://marudoc.app/privacy/
+- Privacy policy (English): https://marudoc.app/en/privacy/
+- Support: support@marudoc.app
