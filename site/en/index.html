@@ -47,6 +47,7 @@
   .cmd pre { flex: 1; margin: 0; padding: 10px 12px; overflow-x: auto; border-radius: 6px; background: rgba(127,127,127,.12); font: 13.5px/1.6 ui-monospace, Menlo, monospace; }
   .cmd button { font: inherit; font-size: 13px; color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
   footer { margin-top: 96px; font-size: 13px; color: var(--sub); }
+  figure video { display: block; width: 100%; height: auto; border-radius: 10px; }
 </style>
 </head>
 <body>
@@ -72,9 +73,8 @@
   <div class="cmd"><pre>curl -fsSL https://marudoc.app/install.sh | sh -s -- --uninstall</pre><button type="button" data-done="Copied">Copy</button></div>
 
   <figure>
-    <img class="light-only" src="../img/radial-light.png" alt="The radial menu that appears when you press and hold a PDF on the desktop.">
-    <img class="dark-only" src="../img/radial-dark.png" alt="">
-    <figcaption>Pressing and holding a PDF on the desktop. The outer ring shows Excel and PowerPoint next to Word.</figcaption>
+    <video src="../img/demo.mp4" poster="../img/demo-poster.jpg" autoplay muted loop playsinline preload="metadata" width="1280" height="720" aria-label="Video: press and hold a PDF, choose Word from the radial menu, and the converted file appears next to it"></video>
+    <figcaption>Press and hold a PDF on the desktop, slide to Office and then Word, and let go. The Word file appears next to the original.</figcaption>
   </figure>
 
   <h2 id="how">How it works</h2>

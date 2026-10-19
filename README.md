@@ -33,10 +33,10 @@ macOS 14 以降、Apple シリコン / Intel。MIT ライセンス。
    curl -fsSL https://marudoc.app/install.sh | sh
    ```
 
-3. Homebrew (`ORG` は公開後に実際の Organization 名に置き換える)
+3. Homebrew (`MaruDoc` は公開後に実際の Organization 名に置き換える)
 
    ```
-   brew install --cask ORG/tap/marudoc
+   brew install --cask marudoc/tap/marudoc
    ```
 
 アンインストールは `curl -fsSL https://marudoc.app/install.sh | sh -s -- --uninstall`、または MaruDoc を終了してゴミ箱に入れます。
@@ -124,10 +124,10 @@ Pick one.
    curl -fsSL https://marudoc.app/install.sh | sh
    ```
 
-3. Homebrew (replace `ORG` with the real organization name once the repository is published):
+3. Homebrew (replace `MaruDoc` with the real organization name once the repository is published):
 
    ```
-   brew install --cask ORG/tap/marudoc
+   brew install --cask marudoc/tap/marudoc
    ```
 
 To uninstall, run `curl -fsSL https://marudoc.app/install.sh | sh -s -- --uninstall`, or quit MaruDoc and move it to the Trash.

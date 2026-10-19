@@ -23,6 +23,9 @@ enum FinderAX {
     /// floating panels, MaruDoc's own included) is Finder's, or when no such window covers it (the desktop).
     /// Menu bar, Dock and transparent windows are skipped. Uses only window bounds, owner and layer, which need
     /// no extra permission.
+    static let systemOverlayOwners: Set<String> = ["WindowManager", "Window Server", "Dock", "Control Center", "ControlCenter",
+                                                    "Notification Center", "NotificationCenter", "SystemUIServer"]
+
     static func finderOwnsPoint(_ point: CGPoint, finderPID: pid_t) -> Bool {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else { return false }
         for w in list {
@@ -31,6 +34,9 @@ enum FinderAX {
                   let alpha = w[kCGWindowAlpha as String] as? Double, alpha > 0.05,
                   let b = w[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: b), rect.contains(point) else { continue }
+            // System overlays (Stage Manager / "click wallpaper to reveal desktop", Dock, Control Center…) span
+            // the screen without hiding desktop icons; they never count as covering.
+            if let name = w[kCGWindowOwnerName as String] as? String, Self.systemOverlayOwners.contains(name) { continue }
             // Finder's own desktop windows sit below layer 0 and never reach here; any Finder window found
             // here is a real window, so ownership is decided by the owner alone.
             return owner == finderPID

@@ -63,6 +63,7 @@
   .cmd pre { flex: 1; margin: 0; padding: 10px 12px; overflow-x: auto; border-radius: 6px; background: rgba(127,127,127,.12); font: 13.5px/1.6 ui-monospace, Menlo, monospace; }
   .cmd button { font: inherit; font-size: 13px; color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
   footer { margin-top: 96px; font-size: 13px; color: var(--sub); }
+  figure video { display: block; width: 100%; height: auto; border-radius: 10px; }
 </style>
 </head>
 <body>
@@ -88,9 +89,8 @@
   <div class="cmd"><pre>curl -fsSL https://marudoc.app/install.sh | sh -s -- --uninstall</pre><button type="button" data-done="コピーしました">コピー</button></div>
 
   <figure>
-    <img class="light-only" src="img/radial-light.png" alt="PDF のアイコンを長押ししたときに出る円形メニュー。内側に Word、画像、テキスト、編集、トリミング、ページ、圧縮、その他。外側に Word、Excel、PowerPoint。">
-    <img class="dark-only" src="img/radial-dark.png" alt="">
-    <figcaption>デスクトップの PDF を長押ししたところ。「Word」の外側に Excel と PowerPoint が開いている。</figcaption>
+    <video src="img/demo.mp4" poster="img/demo-poster.jpg" autoplay muted loop playsinline preload="metadata" width="1280" height="720" aria-label="長押しで円形メニューを出し、Word に変換するまでの動画"></video>
+    <figcaption>デスクトップの PDF を長押しして「Office」から「Word」へ滑らせ、離したところ。変換した Word のファイルが元の隣に出る。</figcaption>
   </figure>
 
   <h2 id="how">使い方</h2>
