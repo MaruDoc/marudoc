@@ -273,7 +273,8 @@ extension SelfTest {
             check("gate: without a token no action rewrites the original",
                   ActionCatalog.inPlaceActionIDs.allSatisfy { ActionCatalog.admission(for: $0, authenticated: false) == .refuse })
             check("gate: without a token other menu actions need the user's confirmation",
-                  [Act.toDOCX, Act.pdfMerge, Act.pdfSplit, Act.pdfCompressStandard, Act.editOpen, Act.openSettings].allSatisfy { ActionCatalog.admission(for: $0, authenticated: false) == .askUser })
+                  [Act.toDOCX, Act.pdfMerge, Act.pdfSplit, Act.pdfCompressStandard, Act.editOpen].allSatisfy { ActionCatalog.admission(for: $0, authenticated: false) == .askUser })
+            check("gate: opening Settings needs no confirmation (it touches no files)", ActionCatalog.admission(for: Act.openSettings, authenticated: false) == .run)
             // Every id the Finder extension can send is accepted with a token.
             let sendable = Set(all)
             let menuIDs = Set(["a.pdf", "a.png", "a.docx", "a.md", "a.xlsx", "a.csv", "a.pptx", "a.rtf"].flatMap { name in
