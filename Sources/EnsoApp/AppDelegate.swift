@@ -68,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func wirePressMonitor() {
         monitor.onOpen = { [weak self] opened in self?.radial.open(opened) }
-        monitor.onUpdate = { [weak self] hit, open, sticky in self?.radial.update(hit: hit, openParent: open, sticky: sticky) }
+        monitor.onUpdate = { [weak self] hit, open, sticky, cancel in self?.radial.update(hit: hit, openParent: open, sticky: sticky, showsCancel: cancel) }
         monitor.onClose = { [weak self] in self?.radial.close() }
         monitor.onChoose = { [weak self] action, target in
             self?.runner.run(action, urls: target.urls, origin: .init(iconFrame: target.iconFrame, onDesktop: target.onDesktop, mouse: nil))

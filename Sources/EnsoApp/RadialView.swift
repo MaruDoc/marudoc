@@ -9,13 +9,15 @@ final class RadialModel: ObservableObject {
     @Published var caption: String = ""
     @Published var appeared = false
     @Published var sticky = false
+    /// The pointer is back on the hub, where a release or click closes the menu.
+    @Published var showsCancel = false
     /// Offscreen snapshots can't render materials; use flat fills instead.
     var flatForSnapshot = false
     var snapshotDark = false
 
     var hoveredTitle: String? {
         switch hit {
-        case .hub: return nil
+        case .hub: return showsCancel ? L("キャンセル") : nil
         case .inner(let i): return nodes.indices.contains(i) ? nodes[i].title : nil
         case .outer(let p, let c):
             guard nodes.indices.contains(p), nodes[p].children.indices.contains(c) else { return nil }

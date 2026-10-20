@@ -20,7 +20,7 @@ final class PressMonitor {
 
     // Main-thread callbacks.
     var onOpen: ((Opened) -> Void)?
-    var onUpdate: ((RadialGeometry.Hit, Int?, Bool) -> Void)?
+    var onUpdate: ((RadialGeometry.Hit, Int?, Bool, Bool) -> Void)?
     var onChoose: ((String, FinderAX.Target) -> Void)?
     var onClose: (() -> Void)?
 
@@ -315,8 +315,8 @@ final class PressMonitor {
     }
 
     private func publish(_ s: RadialSession) {
-        let hit = s.hit, open = s.openParent, sticky = s.sticky
-        DispatchQueue.main.async { [weak self] in self?.onUpdate?(hit, open, sticky) }
+        let hit = s.hit, open = s.openParent, sticky = s.sticky, cancel = s.showsCancel
+        DispatchQueue.main.async { [weak self] in self?.onUpdate?(hit, open, sticky, cancel) }
     }
 
     private func released(at p: CGPoint) {

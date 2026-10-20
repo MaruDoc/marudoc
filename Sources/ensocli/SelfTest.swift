@@ -282,7 +282,14 @@ final class SelfTest {
 
         s = RadialSession(nodes: nodes, center: c)
         s.move(to: at(90, 90)); s.move(to: at(90, 10))
+        check("gesture: back in the centre shows キャンセル", s.showsCancel)
         check("gesture: out and back to the centre cancels", s.release(at: at(90, 10)) == .cancel)
+
+        s = RadialSession(nodes: nodes, center: c)
+        s.move(to: at(0, 10))
+        check("gesture: right after the press the centre shows no キャンセル", !s.showsCancel)
+        s.move(to: at(0, 85))
+        check("gesture: on an item no キャンセル", !s.showsCancel)
 
         s = RadialSession(nodes: nodes, center: c)
         let more = nodes.firstIndex { $0.action == nil }!
@@ -309,6 +316,10 @@ final class SelfTest {
         s = RadialSession(nodes: nodes, center: c, origin: corner)
         s.move(to: CGPoint(x: corner.x + 20, y: corner.y + 20))
         check("edge: moving off the ring is no flick", s.hit == .hub)
+        check("edge: off the ring is not the centre (no キャンセル)", !s.showsCancel)
+        s.move(to: c)
+        check("edge: moving onto the centre shows キャンセル", s.showsCancel)
+        s.move(to: CGPoint(x: corner.x + 20, y: corner.y + 20))
         check("edge: released off the ring stays open", s.release(at: CGPoint(x: corner.x + 20, y: corner.y + 20)) == .keepOpen)
 
         s = RadialSession(nodes: nodes, center: c, origin: corner)

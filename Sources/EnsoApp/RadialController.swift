@@ -19,13 +19,14 @@ final class RadialController {
         model.hit = .hub
         model.openParent = nil
         model.sticky = false
+        model.showsCancel = false
         model.icon = urls.count == 1 ? NSWorkspace.shared.icon(forFile: urls[0].path) : NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
         model.caption = urls.count == 1 ? urls[0].lastPathComponent : String(format: L("%d 項目"), urls.count)
         lastHit = .hub
         show(at: opened.session.center)
     }
 
-    func update(hit: RadialGeometry.Hit, openParent: Int?, sticky: Bool) {
+    func update(hit: RadialGeometry.Hit, openParent: Int?, sticky: Bool, showsCancel: Bool) {
         guard panel?.isVisible == true else { return }
         if hit != lastHit {
             lastHit = hit
@@ -34,6 +35,7 @@ final class RadialController {
         model.hit = hit
         model.openParent = openParent
         model.sticky = sticky
+        model.showsCancel = showsCancel
     }
 
     func close() {

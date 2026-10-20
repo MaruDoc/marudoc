@@ -16,6 +16,8 @@ public struct RadialSession: Sendable {
     public private(set) var hit: RadialGeometry.Hit = .hub
     public private(set) var openParent: Int?
     public private(set) var movedOut = false
+    /// The pointer is inside the hub (not merely `hit == .hub`, which also covers the area beyond a moved ring).
+    public private(set) var inHub: Bool
     public private(set) var sticky = false
     private let childCounts: [Int]
 
@@ -33,11 +35,16 @@ public struct RadialSession: Sendable {
         self.center = center
         self.origin = origin ?? center
         self.armed = hypot(self.origin.x - center.x, self.origin.y - center.y) <= 1
+        self.inHub = self.armed
         self.childCounts = nodes.map { $0.children.count }
     }
 
     /// True when the ring was moved away from the pointer to fit on screen.
     public var isShifted: Bool { hypot(origin.x - center.x, origin.y - center.y) > 1 }
+
+    /// Releasing or clicking now closes the menu without choosing anything: the pointer has come back to the hub.
+    /// Right after the press the pointer is in the hub too, but a release there keeps the menu open, so it doesn't count.
+    public var showsCancel: Bool { inHub && movedOut }
 
     /// Beyond the ring of a moved menu. Distance from its centre says nothing about direction there, so it is no flick.
     private func isOutside(_ p: CGPoint) -> Bool {
@@ -52,9 +59,10 @@ public struct RadialSession: Sendable {
             armed = true
         }
         let dx = p.x - center.x, dy = p.y - center.y
+        let oldHit = hit, oldOpen = openParent, oldCancel = showsCancel
+        inHub = hypot(dx, dy) < RadialGeometry.hubRadius
         if hypot(dx, dy) > RadialGeometry.hubRadius { movedOut = true }
         let newHit = isOutside(p) ? .hub : RadialGeometry.hit(dx: dx, dy: dy, childCounts: childCounts, openParent: openParent)
-        let oldHit = hit, oldOpen = openParent
         hit = newHit
         switch newHit {
         case .hub:
@@ -64,7 +72,7 @@ public struct RadialSession: Sendable {
         case .outer(let parent, _):
             openParent = parent
         }
-        return oldHit != hit || oldOpen != openParent
+        return oldHit != hit || oldOpen != openParent || oldCancel != showsCancel
     }
 
     /// Called after the pointer has rested on an inner item for a moment: reveal its children.
