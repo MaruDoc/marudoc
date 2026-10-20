@@ -7,6 +7,12 @@ public struct RadialSession: Sendable {
     public let nodes: [MenuNode]
     /// Centre in Quartz coordinates (top-left origin).
     public let center: CGPoint
+    /// Where the pointer was when the menu opened. Differs from `center` when the ring was moved to fit on screen;
+    /// the pointer is then left where it is instead of jumping to the centre.
+    public let origin: CGPoint
+    /// False while a moved ring waits for the pointer to leave `origin`. Until then nothing is hovered, so the
+    /// release that ends the long press never picks whatever item happens to lie under the pointer.
+    public private(set) var armed: Bool
     public private(set) var hit: RadialGeometry.Hit = .hub
     public private(set) var openParent: Int?
     public private(set) var movedOut = false
@@ -19,18 +25,35 @@ public struct RadialSession: Sendable {
         case cancel
     }
 
-    public init(nodes: [MenuNode], center: CGPoint) {
+    /// Pointer travel from `origin` that arms a moved ring.
+    static let armDistance: CGFloat = 8
+
+    public init(nodes: [MenuNode], center: CGPoint, origin: CGPoint? = nil) {
         self.nodes = nodes
         self.center = center
+        self.origin = origin ?? center
+        self.armed = hypot(self.origin.x - center.x, self.origin.y - center.y) <= 1
         self.childCounts = nodes.map { $0.children.count }
+    }
+
+    /// True when the ring was moved away from the pointer to fit on screen.
+    public var isShifted: Bool { hypot(origin.x - center.x, origin.y - center.y) > 1 }
+
+    /// Beyond the ring of a moved menu. Distance from its centre says nothing about direction there, so it is no flick.
+    private func isOutside(_ p: CGPoint) -> Bool {
+        isShifted && hypot(p.x - center.x, p.y - center.y) > RadialGeometry.outerEnd + 6
     }
 
     /// Updates the hover state. Returns true when what the menu should show changed.
     @discardableResult
     public mutating func move(to p: CGPoint) -> Bool {
+        if !armed {
+            guard hypot(p.x - origin.x, p.y - origin.y) > Self.armDistance else { return false }
+            armed = true
+        }
         let dx = p.x - center.x, dy = p.y - center.y
         if hypot(dx, dy) > RadialGeometry.hubRadius { movedOut = true }
-        let newHit = RadialGeometry.hit(dx: dx, dy: dy, childCounts: childCounts, openParent: openParent)
+        let newHit = isOutside(p) ? .hub : RadialGeometry.hit(dx: dx, dy: dy, childCounts: childCounts, openParent: openParent)
         let oldHit = hit, oldOpen = openParent
         hit = newHit
         switch newHit {
@@ -55,6 +78,11 @@ public struct RadialSession: Sendable {
     /// The pointer was released (or clicked, in sticky mode) at `p`.
     public mutating func release(at p: CGPoint) -> Decision {
         move(to: p)
+        // A moved ring released before reaching it (or off it) stays open for a click, like a release in the centre.
+        if isShifted, !sticky, !armed || isOutside(p) {
+            sticky = true
+            return .keepOpen
+        }
         switch hit {
         case .outer(let parent, let child):
             if let a = nodes[parent].children[child].action { return .choose(a) }

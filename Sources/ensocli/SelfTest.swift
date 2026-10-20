@@ -298,6 +298,22 @@ final class SelfTest {
         check("gesture: far outside is not on the menu", !s.contains(at(200, 260)))
         let edge = RadialSession.clampedCenter(for: CGPoint(x: 5, y: 5))
         check("gesture: menu near a screen corner is moved fully on screen", edge.x >= RadialGeometry.outerEnd && edge.y >= RadialGeometry.outerEnd)
+
+        // Ring moved inward from a press at the screen corner; the pointer stays at the corner.
+        let corner = CGPoint(x: c.x - 180, y: c.y - 200)
+        s = RadialSession(nodes: nodes, center: c, origin: corner)
+        check("edge: pointer left where it was does not hover anything", !s.move(to: CGPoint(x: corner.x + 3, y: corner.y + 2)) && s.hit == .hub)
+        check("edge: releasing the long press keeps the menu open", s.release(at: CGPoint(x: corner.x + 3, y: corner.y + 2)) == .keepOpen && s.sticky)
+        check("edge: then a click on トリミング chooses it", s.contains(at(cropAngle, 80)) && s.release(at: at(cropAngle, 80)) == .choose(Act.editCrop))
+
+        s = RadialSession(nodes: nodes, center: c, origin: corner)
+        s.move(to: CGPoint(x: corner.x + 20, y: corner.y + 20))
+        check("edge: moving off the ring is no flick", s.hit == .hub)
+        check("edge: released off the ring stays open", s.release(at: CGPoint(x: corner.x + 20, y: corner.y + 20)) == .keepOpen)
+
+        s = RadialSession(nodes: nodes, center: c, origin: corner)
+        s.move(to: at(315, 150)); s.move(to: at(0, 85))
+        check("edge: dragging onto an item and releasing chooses it", s.release(at: at(0, 85)) == .choose(Act.toDOCX))
     }
 
     func testCatalog() {

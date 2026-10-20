@@ -283,16 +283,13 @@ final class PressMonitor {
         let nodes = ActionCatalog.ringMenu(for: found.urls)
         guard !nodes.isEmpty else { setPhase(.idle); return }
         let center = RadialSession.clampedCenter(for: pressPoint)
-        let s = RadialSession(nodes: nodes, center: center)
+        // Near a screen edge the ring is moved inward to fit; the pointer stays on the item that was pressed.
+        let moved = hypot(center.x - pressPoint.x, center.y - pressPoint.y) > 1
+        let s = RadialSession(nodes: nodes, center: center, origin: moved ? (CGEvent(source: nil)?.location ?? pressPoint) : nil)
         session = s
         target = found
         setPhase(.menu)
         if canModifyEvents { postSyntheticMouseUp(at: pressPoint) }
-        if hypot(center.x - pressPoint.x, center.y - pressPoint.y) > 1 {
-            CGEventSource(stateID: .combinedSessionState)?.localEventsSuppressionInterval = 0
-            CGWarpMouseCursorPosition(center)
-            CGAssociateMouseAndMouseCursorPosition(1)
-        }
         if found.selectedElements.count > 1 {
             let elements = found.selectedElements
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { FinderAX.restoreSelection(elements) }
