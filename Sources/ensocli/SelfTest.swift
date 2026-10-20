@@ -780,9 +780,18 @@ final class SelfTest {
         // marudoc:// token handling.
         let req = Bridge.Request(action: "to.pdf", files: [URL(fileURLWithPath: "/tmp/a.pdf")], mouse: nil, token: "abc")
         check("bridge url carries the token", Bridge.url(for: req).flatMap(Bridge.request(from:))?.token == "abc")
-        let tokenDomain = "app.marudoc.selftest-\(UUID().uuidString)"
+        // One fixed throwaway domain, emptied before and removed after. cfprefsd keeps an empty plist even after the
+        // domain is removed, so the file is deleted too and a run leaves nothing in ~/Library/Preferences.
+        let tokenDomain = "app.marudoc.selftest"
+        UserDefaults.standard.removePersistentDomain(forName: tokenDomain)
         Bridge.testGroupOverride = tokenDomain
-        defer { Bridge.testGroupOverride = nil; UserDefaults.standard.removePersistentDomain(forName: tokenDomain) }
+        defer {
+            Bridge.testGroupOverride = nil
+            UserDefaults.standard.removePersistentDomain(forName: tokenDomain)
+            CFPreferencesAppSynchronize(tokenDomain as CFString)
+            let plist = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Preferences/\(tokenDomain).plist")
+            try? FileManager.default.removeItem(at: plist)
+        }
         if let t0 = Bridge.prepareToken() {
             let t0req = Bridge.Request(action: "to.pdf", files: [], token: t0)
             let now = Date()

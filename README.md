@@ -4,14 +4,13 @@
 
 ## 日本語
 
-MaruDoc は、PDF、Word、Excel、PowerPoint、画像、Markdown、テキストの変換と編集を、Mac の中だけで行うアプリです。Finder の右クリックメニューと、デスクトップでファイルを長押しして出る円形メニューから使います。ファイルは外部に送られません。ネットワークに接続するコードがありません。
+MaruDoc は、PDF、Word、Excel、PowerPoint、画像、Markdown、テキストの変換と編集を、Mac の中だけで行うアプリです。Finder の右クリックメニューと、ファイルを長押しして出る円形メニュー (デスクトップと Finder のウインドウ) から使います。ファイルは外部に送られません。ネットワークに接続するコードがありません。
 
 macOS 14 以降、Apple シリコン / Intel。MIT ライセンス。
 
-![長押しメニュー (ライト)](site/img/radial-light.png)
-![長押しメニュー (ダーク)](site/img/radial-dark.png)
+![PDF を長押しして Word に変換する](site/img/readme-demo.gif)
 
-スクリーンショットは差し替え予定です。右クリックメニューの画像も追加します。
+![Finder の右クリックメニュー](site/img/readme-right-click.png)
 
 ### できること
 
@@ -33,7 +32,7 @@ macOS 14 以降、Apple シリコン / Intel。MIT ライセンス。
    curl -fsSL https://marudoc.app/install.sh | sh
    ```
 
-3. Homebrew (`MaruDoc` は公開後に実際の Organization 名に置き換える)
+3. Homebrew
 
    ```
    brew install --cask marudoc/tap/marudoc
@@ -43,10 +42,10 @@ macOS 14 以降、Apple シリコン / Intel。MIT ライセンス。
 
 ### 必要な権限
 
-初回起動時に案内が出ます。システム設定で自分で許可してください。
+それぞれの機能を初めて使うときに案内が出ます。システム設定でご自身で許可してください。設定画面の先頭で、いまの許可の状態を確かめられます。
 
 - Finder 拡張 (一般 → ログイン項目と機能拡張 → Finder): 右クリックメニューを出すために必要
-- アクセシビリティ (プライバシーとセキュリティ): デスクトップで長押ししたファイルを特定し、マウスの動きを読むために必要。キー入力は円形メニューを開いている間だけ受け取る (Esc で閉じるため)。長押しメニューを使わないなら不要
+- アクセシビリティ (プライバシーとセキュリティ): 長押ししたファイルを特定し、マウスの動きを読むために必要。キー入力は円形メニューを開いている間だけ受け取る (Esc で閉じるため)。長押しメニューを使わないなら不要
 - オートメーション (Finder): 変換したファイルをデスクトップの元のファイルの隣に置くために必要。Finder に送るスクリプトは固定で、ファイルの場所は引数として渡す
 
 ### プライバシー
@@ -95,14 +94,13 @@ MIT。[LICENSE](LICENSE) を参照。貢献の方法は [CONTRIBUTING.md](CONTRI
 
 ## English
 
-MaruDoc is a macOS app that converts and edits PDF, Word, Excel, PowerPoint, image, Markdown and text files entirely on your Mac. You use it from the Finder right-click menu, or by pressing and holding a file on the desktop to open a radial menu. Files are never uploaded. The app contains no network code.
+MaruDoc is a macOS app that converts and edits PDF, Word, Excel, PowerPoint, image, Markdown and text files entirely on your Mac. You use it from the Finder right-click menu, or by pressing and holding a file (on the desktop or in a Finder window) to open a radial menu. Files are never uploaded. The app contains no network code.
 
 Requires macOS 14 or later, Apple silicon or Intel. MIT license.
 
-![Radial menu (light)](site/img/radial-light.png)
-![Radial menu (dark)](site/img/radial-dark.png)
+![Press and hold a PDF, convert it to Word](site/img/readme-demo.gif)
 
-These screenshots are placeholders. A screenshot of the right-click menu will be added.
+![The Finder right-click menu](site/img/readme-right-click.png)
 
 ### What it does
 
@@ -124,7 +122,7 @@ Pick one.
    curl -fsSL https://marudoc.app/install.sh | sh
    ```
 
-3. Homebrew (replace `MaruDoc` with the real organization name once the repository is published):
+3. Homebrew
 
    ```
    brew install --cask marudoc/tap/marudoc
@@ -134,10 +132,10 @@ To uninstall, run `curl -fsSL https://marudoc.app/install.sh | sh -s -- --uninst
 
 ### Permissions
 
-MaruDoc shows a short guide on first launch. You grant these yourself in System Settings.
+MaruDoc asks for each permission the first time you use the feature that needs it. You grant them yourself in System Settings. The top of the Settings window shows what is currently allowed.
 
 - Finder extension (General > Login Items & Extensions > Finder): needed for the right-click menu.
-- Accessibility (Privacy & Security): needed to identify the file you pressed on the desktop and to read mouse movement. Key presses are received only while the radial menu is open (to close it with Esc). Not needed if you do not use the press-and-hold menu.
+- Accessibility (Privacy & Security): needed to identify the file you pressed and to read mouse movement. Key presses are received only while the radial menu is open (to close it with Esc). Not needed if you do not use the press-and-hold menu.
 - Automation (Finder): needed to place converted files next to the original on the desktop. The script sent to Finder is fixed text and the file location is passed as an argument.
 
 ### Privacy

@@ -71,9 +71,14 @@ struct Converter {
             }
             let folder = OutputNamer.folder(for: file, tag: "CSV")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            for s in sheets {
-                let name = s.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-                try Formats.writeCSV(s, to: folder.appendingPathComponent(name).appendingPathExtension("csv"))
+            for (i, s) in sheets.enumerated() {
+                // Sheet names become file names: no path separators, no hidden files, no overwriting a sheet whose
+                // name became the same after cleaning.
+                var name = s.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                while name.hasPrefix(".") { name.removeFirst() }
+                if name.isEmpty { name = "Sheet\(i + 1)" }
+                try Formats.writeCSV(s, to: OutputNamer.unique(folder.appendingPathComponent(name).appendingPathExtension("csv")))
             }
             return [folder]
         case (.csv, "xlsx"):
@@ -95,6 +100,7 @@ struct Converter {
                 let pdfData = PDFRenderer.pdfData(from: model)
                 let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
                 try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+                defer { try? FileManager.default.removeItem(at: tmp) }
                 let pdfURL = tmp.appendingPathComponent(file.deletingPathExtension().lastPathComponent).appendingPathExtension("pdf")
                 try pdfData.write(to: pdfURL)
                 let rendered = try Rasterizer.export(pdfURL, format: target, dpi: options.imageDPI, progress: progress, cancelled: cancelled)

@@ -72,10 +72,25 @@ final class EnsoPDFView: PDFView, NSTextFieldDelegate {
         } else {
             displayMode = .singlePageContinuous
             displaysPageBreaks = true
-            autoScales = true
             if let page { go(to: page) }
+            fitPageWidth()
         }
         refreshOverlay()
+    }
+
+    /// Back to the page-width fit used for viewing. Turning `autoScales` on alone can keep the scale crop mode left
+    /// behind (the pages may have just been cropped), so the fit is computed again once the layout has settled.
+    func fitPageWidth() {
+        layoutDocumentView()
+        autoScales = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.model?.mode != .crop else { return }
+            self.layoutDocumentView()
+            let fit = self.scaleFactorForSizeToFit
+            if fit > 0, abs(self.scaleFactor - fit) > 0.001 { self.scaleFactor = fit }
+            self.autoScales = true
+            self.refreshOverlay()
+        }
     }
 
     /// Called when the crop page changes: show it and fit it.
@@ -427,7 +442,8 @@ final class EnsoPDFView: PDFView, NSTextFieldDelegate {
         field.isBordered = true
         field.focusRingType = .exterior
         field.drawsBackground = true
-        field.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.95)
+        // Opaque, so the text being replaced does not show through behind what is typed.
+        field.backgroundColor = NSColor.textBackgroundColor
         field.placeholderString = L("文字を入力")
         field.delegate = self
         field.cell?.wraps = false

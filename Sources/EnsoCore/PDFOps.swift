@@ -258,6 +258,7 @@ enum PDFOps {
     static func compress(_ file: URL, level: CompressionLevel) throws -> URL {
         let doc = try open(file)
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
+        defer { try? FileManager.default.removeItem(at: tmp) }   // gone already once moved into place
         // PDFKit's JPEG / screen options don't touch images already inside a PDF, so a Quartz filter
         // (the same mechanism as Preview's "Reduce File Size") does the work, tuned per level.
         let (quality, dpi, maxSize): (Double, Int, Int) = {
@@ -287,10 +288,7 @@ enum PDFOps {
         try save(doc, to: tmp, options: options)
         let before = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let after = (try? tmp.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard after > 0, Double(after) < Double(before) * 0.97 else {
-            try? FileManager.default.removeItem(at: tmp)
-            throw EngineError.noGain
-        }
+        guard after > 0, Double(after) < Double(before) * 0.97 else { throw EngineError.noGain }
         let out = OutputNamer.file(for: file, ext: "pdf", tag: L("圧縮"))
         try FileManager.default.moveItem(at: tmp, to: out)
         return out

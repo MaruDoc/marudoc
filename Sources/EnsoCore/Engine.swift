@@ -10,7 +10,7 @@ public struct EngineOptions: Sendable {
     public var password: String?
     public var ownerPassword: String?
     public var watermarkText: String?
-    /// Explicit size for "img.resize.custom": long edge in pixels.
+    /// Explicit size for `Act.imgResizeCustom`: long edge in pixels.
     public var resizeLongEdge: Int?
     /// Page ranges for "pdf.split.ranges", as typed ("1-3, 5, 8-10").
     public var splitRanges: String?
@@ -93,8 +93,6 @@ public final class Engine: @unchecked Sendable {
                 result.backups += one.backups
                 sizeBefore += fileSize(file, backups: one.backups)
                 sizeAfter += one.outputs.reduce(0) { $0 + fileSize($1) } + (one.backups.isEmpty ? 0 : fileSize(file))
-                if let m = one.overrideMessage { result.message = m }
-                result.detail = one.detail
                 succeeded += 1
             } catch EngineError.cancelled {
                 throw EngineError.cancelled
@@ -125,8 +123,6 @@ public final class Engine: @unchecked Sendable {
     struct OneResult {
         var outputs: [URL] = []
         var backups: [SafeWrite.Backup] = []
-        var detail: String?
-        var overrideMessage: String?
     }
 
     private func runOne(_ action: String, file: URL, progress: @escaping Progress, cancelled: @escaping Cancelled) async throws -> OneResult {
@@ -177,7 +173,7 @@ public final class Engine: @unchecked Sendable {
         case Act.imgResize50, Act.imgResize25, Act.imgResize2048, Act.imgResize1080:
             let spec: ImageOps.ResizeSpec = action == Act.imgResize50 ? .scale(0.5) : action == Act.imgResize25 ? .scale(0.25) : action == Act.imgResize2048 ? .longEdge(2048) : .longEdge(1080)
             r.outputs = [try ImageOps.resize(file, spec)]
-        case "img.resize.custom":
+        case Act.imgResizeCustom:
             guard let edge = options.resizeLongEdge, edge > 0 else { throw EngineError.failed(L("サイズを指定してください")) }
             r.outputs = [try ImageOps.resize(file, .longEdge(edge))]
         case Act.imgCompressLight, Act.imgCompressStandard, Act.imgCompressStrong:
@@ -230,7 +226,7 @@ public final class Engine: @unchecked Sendable {
         case Act.pdfWatermark: return L("透かしを入れました")
         case Act.pdfExtractImages: return L("画像を取り出しました")
         case Act.pdfFlatten: return L("注釈を統合しました")
-        case Act.imgResize50, Act.imgResize25, Act.imgResize2048, Act.imgResize1080, "img.resize.custom": return L("サイズを変更しました")
+        case Act.imgResize50, Act.imgResize25, Act.imgResize2048, Act.imgResize1080, Act.imgResizeCustom: return L("サイズを変更しました")
         case Act.imgRemoveBackground: return L("背景を削除しました")
         case Act.imgStripMetadata: return L("位置情報などを削除しました")
         case Act.imgOCR: return L("文字認識しました")

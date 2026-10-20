@@ -5,8 +5,8 @@
 #
 # This script downloads the notarized MaruDoc.dmg, checks its SHA-256, mounts it,
 # checks the app's signature and notarization, and copies MaruDoc.app into
-# /Applications. It does not use sudo and it never deletes anything: an existing
-# copy is moved to ~/.Trash.
+# /Applications. It does not use sudo and never deletes your files: an existing
+# copy is moved to ~/.Trash. Only its own download folder is removed at the end.
 #
 # Options (pass after "sh -s --" when piping):
 #   --uninstall   quit MaruDoc, move it to the Trash, turn off its Finder extension
@@ -41,6 +41,7 @@ MIN_MACOS=14
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 MNT=""
+WORK=""
 
 say() {
   # say "日本語" "English"
@@ -61,6 +62,15 @@ detach() {
       || true
     MNT=""
   fi
+}
+
+# Remove the download folder this script created (nothing else).
+cleanup() {
+  detach
+  case "$WORK" in
+    "${TMPDIR:-/tmp}"/marudoc.*|/tmp/marudoc.*) rm -rf "$WORK" ;;
+  esac
+  WORK=""
 }
 
 usage() {
@@ -174,8 +184,9 @@ do_install() {
   fi
 
   # 3. Download
-  work="$(mktemp -d "${TMPDIR:-/tmp}/marudoc.XXXXXX")"
-  dmg="$work/MaruDoc.dmg"
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/marudoc.XXXXXX")"
+  trap cleanup EXIT
+  dmg="$WORK/MaruDoc.dmg"
   say "MaruDoc をダウンロードしています。" "Downloading MaruDoc."
   if [ -t 2 ]; then progress="--progress-bar"; else progress="-sS"; fi
   curl -fL --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 "$progress" \
@@ -192,9 +203,8 @@ do_install() {
   say "チェックサムを確認しました。" "Checksum verified."
 
   # 5. Mount
-  MNT="$work/mnt"
+  MNT="$WORK/mnt"
   mkdir "$MNT"
-  trap detach EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM HUP
   hdiutil attach "$dmg" -nobrowse -readonly -noautoopen -mountpoint "$MNT" -quiet </dev/null >/dev/null \
@@ -268,14 +278,14 @@ do_install() {
   say "インストールしました: $target (バージョン ${version:-?}, ビルド ${build:-?})" \
       "Installed: $target (version ${version:-?}, build ${build:-?})"
   echo
-  say "初回起動後、次の 3 つの許可が必要です。システム設定で本人が操作してください。" \
-      "After the first launch, MaruDoc asks for three permissions. You turn them on in System Settings."
-  say "1. Finder 拡張: 一般 > ログイン項目と機能拡張 > Finder" \
-      "1. Finder extension: General > Login Items & Extensions > Finder"
-  say "2. アクセシビリティ: プライバシーとセキュリティ > アクセシビリティ" \
-      "2. Accessibility: Privacy & Security > Accessibility"
-  say "3. オートメーション: MaruDoc から Finder の操作を許可" \
-      "3. Automation: allow MaruDoc to control Finder"
+  say "機能を初めて使うときに、次の許可を求められます。システム設定でご自身で許可してください。" \
+      "MaruDoc asks for these permissions when you first use the feature that needs them. You turn them on in System Settings."
+  say "1. Finder 拡張 (右クリックメニュー): 一般 > ログイン項目と機能拡張 > Finder" \
+      "1. Finder extension (right-click menu): General > Login Items & Extensions > Finder"
+  say "2. アクセシビリティ (長押しメニュー。使わないなら不要): プライバシーとセキュリティ > アクセシビリティ" \
+      "2. Accessibility (press-and-hold menu; not needed if you don't use it): Privacy & Security > Accessibility"
+  say "3. オートメーション (デスクトップに結果を置く): MaruDoc から Finder の操作を許可" \
+      "3. Automation (placing results on the desktop): allow MaruDoc to control Finder"
 }
 
 main() {

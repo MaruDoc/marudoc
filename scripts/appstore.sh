@@ -7,8 +7,8 @@
 # Upload the resulting .pkg with Apple's Transporter app.
 #
 # Usage:
-#   TEAM_ID=XXXXXXXXXX SIGN_ID="Apple Distribution: Yitao Ding (XXXXXXXXXX)" \
-#   INSTALLER_ID="3rd Party Mac Developer Installer: Yitao Ding (XXXXXXXXXX)" \
+#   TEAM_ID=XXXXXXXXXX SIGN_ID="Apple Distribution: <name> (XXXXXXXXXX)" \
+#   INSTALLER_ID="3rd Party Mac Developer Installer: <name> (XXXXXXXXXX)" \
 #   APP_PROFILE=~/Downloads/MaruDoc_MAS.provisionprofile EXT_PROFILE=~/Downloads/MaruDocFinder_MAS.provisionprofile \
 #   VERSION=1.0.0 BUILDNUM=1 scripts/appstore.sh
 set -euo pipefail

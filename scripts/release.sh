@@ -7,7 +7,7 @@
 #      (asks for an app-specific password from appleid.apple.com)
 #
 # Usage:
-#   SIGN_ID="Developer ID Application: Yitao Ding (TEAMID)" VERSION=1.0.0 BUILDNUM=1 scripts/release.sh
+#   SIGN_ID="Developer ID Application: <name> (<TEAMID>)" VERSION=1.0.0 BUILDNUM=1 scripts/release.sh
 set -euo pipefail
 ROOT="${0:A:h:h}"
 BUILD_ROOT="${BUILD_ROOT:-$ROOT/build}"
@@ -47,7 +47,8 @@ xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
-# The site links to MaruDoc.dmg; keep the versioned file as the archive copy.
+# MaruDoc.dmg is the file attached to the GitHub release (marudoc.app/MaruDoc.dmg redirects to the latest one);
+# the versioned file stays here as the archive copy. Run scripts/update_install_hash.sh afterwards.
 ditto "$DMG" "$BUILD_ROOT/MaruDoc.dmg"
 
 echo "==> done"

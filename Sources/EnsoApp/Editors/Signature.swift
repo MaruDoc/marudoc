@@ -26,7 +26,11 @@ enum SignatureStore {
 
     static func save(_ strokes: [[CGPoint]]) {
         let raw = strokes.map { $0.map { [Double($0.x), Double($0.y)] } }
-        if let data = try? JSONEncoder().encode(raw) { try? data.write(to: fileURL, options: .atomic) }
+        guard let data = try? JSONEncoder().encode(raw) else { return }
+        let url = fileURL
+        try? data.write(to: url, options: .atomic)
+        // A signature is personal: readable by this user only.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     static func clear() { try? FileManager.default.removeItem(at: fileURL) }

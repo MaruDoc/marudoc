@@ -41,6 +41,8 @@ public enum Act {
     public static let imgResize25 = "img.resize.25"
     public static let imgResize2048 = "img.resize.2048"
     public static let imgResize1080 = "img.resize.1080"
+    /// Long edge typed by the user in the resize prompt. Internal: never offered by a menu, so never accepted from Finder.
+    public static let imgResizeCustom = "img.resize.custom"
     public static let imgRotateRight = "img.rotate.right"
     public static let imgRotateLeft = "img.rotate.left"
     public static let imgFlipH = "img.flip.h"

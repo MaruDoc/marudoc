@@ -201,8 +201,10 @@ final class PDFEditorModel: ObservableObject {
             if let doc = PDFDocument(data: data) {
                 document = doc
                 pdfView?.document = doc
-                selectedPage = min(index, doc.pageCount - 1)
+                selectedPage = max(0, min(index, doc.pageCount - 1))
                 pageVersion += 1
+                // The restored pages can be larger than the cropped ones; keep the scale from cutting them off.
+                if mode != .crop { pdfView?.fitPageWidth() }
                 // Older entries point at objects of the replaced document; they can't be undone any more.
                 undoStack.removeAll()
                 savedDepth = -1
@@ -412,7 +414,7 @@ final class PDFEditorModel: ObservableObject {
         cropRect = nil
         mode = .view
         pagesChanged()
-        pdfView?.layoutDocumentView()
+        pdfView?.fitPageWidth()
         pdfView?.needsDisplay = true
     }
 
@@ -426,7 +428,7 @@ final class PDFEditorModel: ObservableObject {
             p.setBounds(p.bounds(for: .mediaBox), for: .cropBox)
         }
         pagesChanged()
-        pdfView?.layoutDocumentView()
+        if mode == .crop { pdfView?.layoutDocumentView() } else { pdfView?.fitPageWidth() }
         pdfView?.needsDisplay = true
         if mode == .crop { prepareCrop() }
     }

@@ -121,7 +121,7 @@ enum Prompts {
         let view = ResizeView(originalWidth: w, originalHeight: h) { longEdge in
             guard let p = panelRef else { return }
             var o = EngineOptions(); o.resizeLongEdge = longEdge
-            coordinator.perform("img.resize.custom", urls: urls, options: o, from: p)
+            coordinator.perform(Act.imgResizeCustom, urls: urls, options: o, from: p)
         } cancel: { panelRef?.close() }
         let panel = host(view, title: L("サイズ"))
         panelRef = panel

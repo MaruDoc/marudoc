@@ -13,20 +13,13 @@ enum DebugTools {
 
     #if DEBUG
     static func handle(_ url: URL, app: AppDelegate) {
-        let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         switch url.path {
         case "/snapshot":
-            #if DEBUG
             MainActor.assumeIsolated { snapshots() }
-            #endif
-            break
         case "/state":
             Log.info("state ax=\(Permissions.accessibilityGranted) ext=\(Permissions.finderExtensionEnabled) tap=\(app.monitor.isRunning) active=\(app.monitor.canModifyEvents) phase=\(app.monitor.currentPhase)")
         default:
-            #if DEBUG
             for i in 0..<20 { DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 1.5) { AXDebug.dumpUnderMouse() } }
-            #endif
-            break
         }
     }
     #endif

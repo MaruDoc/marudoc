@@ -9,8 +9,6 @@ final class ActionRunner {
     let hud = HUDController()
     private var activeHUDs: [HUDController] = []
     lazy var editors = EditorCoordinator(runner: self)
-    private var running: Task<Void, Never>?
-    private var cancelFlag = CancelFlag()
 
     final class CancelFlag: @unchecked Sendable { var value = false }
 
@@ -83,7 +81,6 @@ final class ActionRunner {
         opts.imageDPI = Settings.shared.imageDPI
         engine.options = opts
         let flag = CancelFlag()
-        cancelFlag = flag
         let hud = HUDController()
         activeHUDs.append(hud)
         // Stack a little lower when another job is still showing.
@@ -91,11 +88,13 @@ final class ActionRunner {
         hud.onHidden = { [weak self, weak hud] in self?.activeHUDs.removeAll { $0 === hud } }
         hud.showWorking(ActionCatalog.title(for: action), detail: urls.count == 1 ? urls[0].lastPathComponent : String(format: L("%d 項目"), urls.count),
                         anchor: anchor.offsetBy(dx: 0, dy: -offset), onCancel: { flag.value = true })
-        running = Task { @MainActor in
+        // Progress arrives on the engine's thread and is only ever applied on the main queue.
+        nonisolated(unsafe) let progressHUD = hud
+        Task { @MainActor in
             do {
                 let result = try await Task.detached(priority: .userInitiated) {
                     try await engine.run(action, files: urls, progress: { p in
-                        DispatchQueue.main.async { hud.update(progress: p) }
+                        DispatchQueue.main.async { progressHUD.update(progress: p) }
                     }, cancelled: { flag.value })
                 }.value
                 if let text = result.clipboardText {

@@ -222,6 +222,17 @@ final class PressMonitor {
             released(at: loc)
             return swallow
 
+        case (.leftMouseDown, .menu):
+            // A new press while the menu still waits for its release: that release was lost. Treat the press like a
+            // click in sticky mode, so a visible menu can still be used, and anywhere else closes it and starts over.
+            trace("down while menu open; release was missed")
+            if session?.contains(loc) == true {
+                pointerMoved(loc)
+                return swallow
+            }
+            closeMenu()
+            return handle(type: type, event: event)
+
         case (.mouseMoved, .sticky), (.leftMouseDragged, .sticky):
             pointerMoved(loc)
             return pass
@@ -265,6 +276,10 @@ final class PressMonitor {
         guard hypot(current.x - pressPoint.x, current.y - pressPoint.y) <= slop else { trace("moved"); setPhase(.idle); return }
 
         guard let found = FinderAX.target(at: pressPoint, allowWindows: allowWindows) else { trace("no Finder item"); setPhase(.idle); return }
+        // The Accessibility calls above block this thread. If Finder was slow, the release may have arrived (or been
+        // lost to a tap timeout) meanwhile; opening now would leave a menu that no mouse-up ever closes.
+        guard phase == .pressed else { trace("press ended during lookup"); return }
+        guard CGEventSource.buttonState(.combinedSessionState, button: .left) else { trace("button up after lookup"); setPhase(.idle); return }
         let nodes = ActionCatalog.ringMenu(for: found.urls)
         guard !nodes.isEmpty else { setPhase(.idle); return }
         let center = RadialSession.clampedCenter(for: pressPoint)

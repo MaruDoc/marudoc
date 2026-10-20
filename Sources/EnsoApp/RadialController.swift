@@ -8,6 +8,8 @@ final class RadialController {
     let model = RadialModel()
     private var panel: NSPanel?
     private var lastHit: RadialGeometry.Hit = .hub
+    /// Bumped on every open, so a fade-out that was still running cannot hide the menu that opened after it.
+    private var generation = 0
 
     var isOpen: Bool { panel?.isVisible == true && model.appeared }
 
@@ -36,12 +38,14 @@ final class RadialController {
 
     func close() {
         guard let panel, panel.isVisible else { return }
+        let closing = generation
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.12
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
+            guard let self, self.generation == closing else { return }
             panel.orderOut(nil)
-            self?.model.appeared = false
+            self.model.appeared = false
         })
     }
 
@@ -50,10 +54,15 @@ final class RadialController {
         let size = RadialGeometry.panelSize
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         let frame = NSRect(x: center.x - size / 2, y: primaryHeight - center.y - size / 2, width: size, height: size)
+        generation += 1
         let panel = self.panel ?? makePanel()
         self.panel = panel
         panel.setFrame(frame, display: false)
-        panel.alphaValue = 1
+        // Through the animator with no duration, so a fade-out still running is replaced rather than finishing at 0.
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0
+            panel.animator().alphaValue = 1
+        }
         panel.orderFrontRegardless()
         model.appeared = false
         DispatchQueue.main.async { self.model.appeared = true }

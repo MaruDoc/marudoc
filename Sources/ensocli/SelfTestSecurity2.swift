@@ -266,7 +266,7 @@ extension SelfTest {
                   && ActionCatalog.admission(for: Act.imgRotateLeft, authenticated: true) == .run
                   && ActionCatalog.admission(for: Act.copyText, authenticated: true) == .run
                   && ActionCatalog.admission(for: Act.openSettings, authenticated: true) == .run)
-            check("gate: internal ids are refused even with a token", [Act.pdfDecrypt, Act.pdfEncrypt, Act.pdfFlatten, Act.pdfWatermark, "img.resize.custom", "nonsense", "edit.nothing", ""]
+            check("gate: internal ids are refused even with a token", [Act.pdfDecrypt, Act.pdfEncrypt, Act.pdfFlatten, Act.pdfWatermark, Act.imgResizeCustom, "nonsense", "edit.nothing", ""]
                 .allSatisfy { ActionCatalog.admission(for: $0, authenticated: true) == .refuse })
             check("gate: unknown ids are refused without a token", ActionCatalog.admission(for: "nonsense", authenticated: false) == .refuse)
             check("gate: without a token the clipboard action is refused", ActionCatalog.admission(for: Act.copyText, authenticated: false) == .refuse)
