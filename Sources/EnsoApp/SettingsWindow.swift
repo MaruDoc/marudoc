@@ -115,7 +115,7 @@ final class PermissionMonitor: ObservableObject {
     }
 
     private func refreshAutomation() {
-        guard !checkingAutomation else { return }
+        guard Permissions.finderControl, !checkingAutomation else { return }
         checkingAutomation = true
         DispatchQueue.global(qos: .utility).async {
             let status = Permissions.finderAutomationStatus()
@@ -144,7 +144,9 @@ private struct WelcomeView: View {
             VStack(spacing: 8) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 64, height: 64)
                 Text(L("MaruDoc へようこそ")).font(.title2.weight(.semibold))
-                Text(L("ファイルを右クリックするか、デスクトップで長押しするだけで、変換と編集ができます。処理はすべてこの Mac の中で行い、ファイルを外に送ることはありません。"))
+                Text(Permissions.finderControl
+                     ? L("ファイルを右クリックするか、デスクトップで長押しするだけで、変換と編集ができます。処理はすべてこの Mac の中で行い、ファイルを外に送ることはありません。")
+                     : L("Finder でファイルを右クリックするだけで、変換と編集ができます。処理はすべてこの Mac の中で行い、ファイルを外に送ることはありません。"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -159,6 +161,7 @@ private struct WelcomeView: View {
                                   title: L("右クリックメニューを有効にする"),
                                   detail: L("Finder 拡張機能で MaruDoc をオンにします。"),
                                   done: state.finderExtension, button: L("設定を開く…")) { Permissions.openExtensionSettings() }
+                    if Permissions.finderControl {
                     PermissionRow(symbol: "accessibility", tint: .blue,
                                   title: L("長押しメニューを許可する"),
                                   detail: L("アクセシビリティで MaruDoc をオンにします。"),
@@ -172,6 +175,7 @@ private struct WelcomeView: View {
                                   button: state.automation == .denied ? L("設定を開く…") : L("許可する…")) {
                         if state.automation == .denied { Permissions.openAutomationSettings() } else { state.requestAutomation() }
                     }
+                    }
                     if SandboxAccess.isSandboxed {
                         PermissionRow(symbol: "folder", tint: .orange,
                                       title: L("ファイルへのアクセスを許可する"),
@@ -182,7 +186,9 @@ private struct WelcomeView: View {
                     }
                 }
                 Section {
-                    Text(L("ファイルを押したまま少し待つ → 円が出たら行きたい方向へ滑らせて離す。中心で離すとメニューが残るので、クリックでも選べます。"))
+                    Text(Permissions.finderControl
+                         ? L("ファイルを押したまま少し待つ → 円が出たら行きたい方向へ滑らせて離す。中心で離すとメニューが残るので、クリックでも選べます。")
+                         : L("Finder でファイルを選んで右クリック →「MaruDoc」から変換や編集を選びます。複数のファイルを選んでまとめて処理することもできます。"))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -253,6 +259,7 @@ private struct GeneralView: View {
                     .onChange(of: launchAtLogin) { _, v in Settings.shared.launchAtLogin = v }
                 Toggle(L("メニューバーに表示"), isOn: $s.showMenuBarIcon)
             }
+            if Permissions.finderControl {
             Section(L("長押しメニュー")) {
                 Toggle(L("デスクトップで長押しメニューを使う"), isOn: $s.pressEnabled)
                 Toggle(L("Finder のウインドウでも使う"), isOn: $s.pressInWindows).disabled(!s.pressEnabled)
@@ -264,8 +271,11 @@ private struct GeneralView: View {
                 }
                 .disabled(!s.pressEnabled)
             }
+            }
             Section(L("書き出し")) {
-                Toggle(L("デスクトップでは元のファイルの隣に並べる"), isOn: $s.placeNextToOriginal)
+                if Permissions.finderControl {
+                    Toggle(L("デスクトップでは元のファイルの隣に並べる"), isOn: $s.placeNextToOriginal)
+                }
                 Toggle(L("変換したファイルを Finder で選択する"), isOn: $s.revealOutputs)
                 Picker(L("PDF を画像にするときの解像度"), selection: $s.imageDPI) {
                     Text("72 dpi").tag(72.0)
@@ -292,8 +302,10 @@ private struct StatusSection: View {
                       title: L("Finder の右クリックメニュー"),
                       text: state.finderExtension ? (state.extensionRunning ? L("動作中") : L("有効")) : L("無効です"),
                       button: state.finderExtension ? nil : L("設定を開く…")) { Permissions.openExtensionSettings() }
-            pressRow
-            automationRow
+            if Permissions.finderControl {
+                pressRow
+                automationRow
+            }
         }
     }
 

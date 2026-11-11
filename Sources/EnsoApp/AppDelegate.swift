@@ -29,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SafeWrite.pruneOldBackups()
         SandboxAccess.restore()
         Warmup.run()
-        wirePressMonitor()
+        if Permissions.finderControl { wirePressMonitor() }
         PermissionMonitor.shared.pressProbe = { [weak self] in self?.monitor.isActive ?? false }
         updateStatusItem()
         NotificationCenter.default.addObserver(forName: .ensoSettingsChanged, object: nil, queue: .main) { [weak self] _ in
@@ -80,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyPressSettings() {
+        guard Permissions.finderControl else { return }
         // Turning press-and-hold on is the moment to ask for Accessibility (never at launch, never while it stays on).
         let turnedOn = Settings.shared.pressEnabled && !lastPressEnabled
         lastPressEnabled = Settings.shared.pressEnabled
@@ -115,12 +116,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let image = NSImage(systemSymbolName: "circle.dashed", accessibilityDescription: "MaruDoc")
         image?.isTemplate = true
         item.button?.image = image
-        item.button?.appearsDisabled = !Settings.shared.pressEnabled
+        item.button?.appearsDisabled = Permissions.finderControl && !Settings.shared.pressEnabled
 
         let menu = NSMenu()
         let header = NSMenuItem(title: "MaruDoc", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        if Permissions.finderControl { addPressItems(to: menu) }
+        menu.addItem(.separator())
+        let settings = NSMenuItem(title: L("設定…"), action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+        let about = NSMenuItem(title: L("MaruDoc について"), action: #selector(openAbout), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: L("MaruDoc を終了"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        item.menu = menu
+    }
+
+    private func addPressItems(to menu: NSMenu) {
         let toggle = NSMenuItem(title: L("長押しメニュー"), action: #selector(togglePress), keyEquivalent: "")
         toggle.target = self
         toggle.state = Settings.shared.pressEnabled ? .on : .off
@@ -136,16 +151,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             warn.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
             menu.addItem(warn)
         }
-        menu.addItem(.separator())
-        let settings = NSMenuItem(title: L("設定…"), action: #selector(openSettings), keyEquivalent: ",")
-        settings.target = self
-        menu.addItem(settings)
-        let about = NSMenuItem(title: L("MaruDoc について"), action: #selector(openAbout), keyEquivalent: "")
-        about.target = self
-        menu.addItem(about)
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: L("MaruDoc を終了"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        item.menu = menu
     }
 
     @objc private func togglePress() { Settings.shared.pressEnabled.toggle() }

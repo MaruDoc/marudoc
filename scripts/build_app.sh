@@ -38,6 +38,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APPEX/Contents/MacOS"
 ditto "$BIN/EnsoApp" "$APP/Contents/MacOS/MaruDoc"
 ditto "$BIN/EnsoFinderSync" "$APPEX/Contents/MacOS/MaruDocFinder"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILDNUM/" Resources/App/Info.plist > "$APP/Contents/Info.plist"
+# The App Store build never sends Apple Events to Finder, so it carries no usage description for them.
+[[ "$VARIANT" == appstore ]] && /usr/libexec/PlistBuddy -c "Delete :NSAppleEventsUsageDescription" "$APP/Contents/Info.plist"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILDNUM/" Resources/FinderSync/Info.plist > "$APPEX/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 ditto Resources/App/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"

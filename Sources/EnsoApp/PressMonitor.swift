@@ -49,6 +49,9 @@ final class PressMonitor {
     private var keyTap: CFMachPort?
     private var runLoop: CFRunLoop?
     private var thread: Thread?
+    /// Keeps App Nap off while the monitor runs. MaruDoc has no visible window most of the time, so macOS would
+    /// otherwise throttle its main thread, which draws the menu.
+    private var activity: NSObjectProtocol?
     private(set) var canModifyEvents = false
 
     private let stateLock = NSLock()
@@ -68,6 +71,11 @@ final class PressMonitor {
 
     func start() {
         guard thread == nil else { return }
+        if activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: ProcessInfo.ActivityOptions.userInitiatedAllowingIdleSystemSleep.subtracting([.suddenTerminationDisabled, .automaticTerminationDisabled]),
+                reason: "Press-and-hold menu")
+        }
         let t = Thread { [weak self] in self?.threadMain() }
         t.name = "MaruDoc event tap"
         t.qualityOfService = .userInteractive
@@ -76,6 +84,7 @@ final class PressMonitor {
     }
 
     func stop() {
+        if let a = activity { ProcessInfo.processInfo.endActivity(a); activity = nil }
         guard let rl = runLoop else { thread = nil; return }
         CFRunLoopPerformBlock(rl, CFRunLoopMode.defaultMode.rawValue) { [weak self] in
             guard let self else { return }

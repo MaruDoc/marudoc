@@ -7,7 +7,11 @@ final class RadialModel: ObservableObject {
     @Published var openParent: Int?
     @Published var icon: NSImage?
     @Published var caption: String = ""
+    /// Drives the pop-in scale only. Visibility does not depend on it, so a lost or stalled animation cannot leave
+    /// an open menu invisible.
     @Published var appeared = false
+    /// False only while the menu fades out.
+    @Published var visible = true
     @Published var sticky = false
     /// The pointer is back on the hub, where a release or click closes the menu.
     @Published var showsCancel = false
@@ -66,7 +70,7 @@ struct RadialMenuView: View {
         }
         .frame(width: size, height: size)
         .scaleEffect(model.appeared || reduceMotion ? 1 : 0.88)
-        .opacity(model.appeared ? 1 : 0)
+        .opacity(model.visible ? 1 : 0)
         .animation(.spring(response: 0.2, dampingFraction: 0.8), value: model.appeared)
         .animation(.easeOut(duration: 0.12), value: model.openParent)
         .animation(.easeOut(duration: 0.08), value: model.hit)

@@ -38,6 +38,8 @@ codesign -d --entitlements - "$APP" | grep -q "app-sandbox" || { echo "not sandb
 codesign -d --entitlements - "$APP" | grep -q "application-groups" || { echo "app group entitlement missing"; exit 1; }
 codesign -d --entitlements - "$APP/Contents/PlugIns/MaruDocFinder.appex" 2>/dev/null | grep -q "application-groups" || { echo "app group entitlement missing in Finder extension"; exit 1; }
 codesign -d --entitlements - "$APP" | grep -q "network" && { echo "network entitlement present"; exit 1; } || true
+codesign -d --entitlements - "$APP" | grep -q "apple-events" && { echo "apple-events entitlement present (refused by App Review)"; exit 1; } || true
+/usr/libexec/PlistBuddy -c "Print :NSAppleEventsUsageDescription" "$APP/Contents/Info.plist" >/dev/null 2>&1 && { echo "NSAppleEventsUsageDescription present"; exit 1; } || true
 
 PKG="$BUILD_ROOT/MaruDoc-$VERSION-AppStore.pkg"
 productbuild --component "$APP" /Applications --sign "$INSTALLER_ID" "$PKG"

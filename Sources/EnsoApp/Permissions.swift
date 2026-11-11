@@ -3,9 +3,15 @@ import ApplicationServices
 import FinderSync
 
 enum Permissions {
-    static var accessibilityGranted: Bool { AXIsProcessTrusted() }
+    /// Accessibility (press-and-hold menu, desktop icon positions) and Apple Events to Finder (placing files next to
+    /// the original). The Mac App Store build has neither: App Review refuses both (guideline 2.4.5), so that build
+    /// works from the Finder right-click menu only and never asks for these permissions.
+    static var finderControl: Bool { !SandboxAccess.isSandboxed }
+
+    static var accessibilityGranted: Bool { finderControl && AXIsProcessTrusted() }
 
     static func requestAccessibility() {
+        guard finderControl else { return }
         _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
     }
 
@@ -29,6 +35,7 @@ enum Permissions {
 
     /// Automation permission for Finder. Can block (Finder not responding), so call it off the main thread.
     static func finderAutomationStatus(askUser: Bool = false) -> AutomationStatus {
+        guard finderControl else { return .unknown }
         var addr = AEAddressDesc()
         let bundleID = Array("com.apple.finder".utf8)
         let created = bundleID.withUnsafeBytes { raw in

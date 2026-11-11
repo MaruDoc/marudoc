@@ -3,6 +3,10 @@ extension AppStrings {
     static let enStatus: [String: String] = [
         "いまの状態": "Status",
         "Finder の右クリックメニュー": "Finder Right-Click Menu",
+        "Finder でファイルを右クリックするだけで、変換と編集ができます。処理はすべてこの Mac の中で行い、ファイルを外に送ることはありません。":
+            "Right-click a file in Finder to convert or edit it. Everything happens on this Mac. Your files are never sent anywhere.",
+        "Finder でファイルを選んで右クリック →「MaruDoc」から変換や編集を選びます。複数のファイルを選んでまとめて処理することもできます。":
+            "Select files in Finder, right-click, and choose a conversion or edit under “MaruDoc”. You can select several files to process them together.",
         "デスクトップの並べ方": "Placing Files on the Desktop",
         "有効": "On",
         "動作中": "Running",

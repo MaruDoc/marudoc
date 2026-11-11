@@ -26,7 +26,7 @@
 
 set -eu
 
-EXPECTED_SHA256="551aa03376e5b35cb69e408dddaf47e7de9de3b52e66bf97bd07e799d1d0b3a2"
+EXPECTED_SHA256="f6dc63647428281ddeddb2eb08a51e4c99da9c1426378d14d57a682e6cd591dc"
 
 DMG_URL="${MARUDOC_DMG_URL:-https://marudoc.app/MaruDoc.dmg}"
 INSTALL_DIR="${MARUDOC_INSTALL_DIR:-/Applications}"

@@ -22,7 +22,7 @@ final class ActionRunner {
     func anchor(for urls: [URL], origin: Origin) -> NSRect {
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         var frame = origin.iconFrame
-        if frame == nil, let first = urls.first, DesktopPlacer.isOnDesktop(first) {
+        if frame == nil, Permissions.finderControl, let first = urls.first, DesktopPlacer.isOnDesktop(first) {
             frame = FinderAX.desktopIconFrame(for: first)
         }
         if let f = frame {

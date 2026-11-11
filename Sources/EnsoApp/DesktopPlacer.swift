@@ -17,7 +17,7 @@ enum DesktopPlacer {
 
     static func place(_ outputs: [URL], near original: URL) {
         let items = outputs.filter(isOnDesktop)
-        guard !items.isEmpty, isOnDesktop(original), Settings.shared.placeNextToOriginal else { return }
+        guard Permissions.finderControl, !items.isEmpty, isOnDesktop(original), Settings.shared.placeNextToOriginal else { return }
         // Finder automation is asked for here, the first time a file really has to be placed (never at launch).
         // Denied: skip silently; the file is still next to the original and Finder places it.
         Permissions.ensureFinderAutomation { status in
