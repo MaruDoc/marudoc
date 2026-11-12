@@ -1,7 +1,8 @@
 import AppKit
 
 /// Lays out an attributed string on pages with TextKit 1 and writes a PDF.
-/// Paragraphs tagged with `.ensoPageBreak` start a new page.
+/// Paragraphs tagged with `.ensoPageBreak` start a new page. Footnote marks (`.ensoFootnote`) get their notes at the
+/// foot of the page the mark lands on.
 public enum PDFRenderer {
 
     public struct PageSetup {
@@ -19,7 +20,7 @@ public enum PDFRenderer {
         var s = setup ?? PageSetup()
         if setup == nil, let size = model.pageSize, size.width > 100, size.height > 100 { s.size = size }
         let style = AttributedConverter.Style(bodySize: CGFloat(model.bodyFontSize), contentWidth: s.contentSize.width,
-                                              contentHeight: s.contentSize.height)
+                                              contentHeight: s.contentSize.height, paged: true)
         let attr = AttributedConverter.attributedString(from: model, style: style)
         return pdfData(from: attr, setup: s, title: model.title, pageNumbers: pageNumbers)
     }
@@ -34,8 +35,14 @@ public enum PDFRenderer {
 
         let segments = split(attr)
         var pageIndex = 0
-        var pages: [(NSLayoutManager, NSTextContainer)] = []
+        var pages: [Page] = []
         var storages: [NSTextStorage] = []   // keep alive while drawing
+        var hasFootnotes = false
+        attr.enumerateAttribute(.ensoFootnote, in: NSRange(location: 0, length: attr.length)) { v, _, stop in
+            if v != nil { hasFootnotes = true; stop.pointee = true }
+        }
+        // Footnote text that did not fit at the foot of its page continues on the next one.
+        var carried = NSAttributedString()
 
         for segment in segments {
             let storage = NSTextStorage(attributedString: segment)
@@ -48,17 +55,28 @@ public enum PDFRenderer {
                 let tc = NSTextContainer(size: setup.contentSize)
                 tc.lineFragmentPadding = 0
                 lm.addTextContainer(tc)
+                var page = Page(lm: lm, tc: tc)
+                if hasFootnotes { page.notes = placeFootnotes(lm, tc, setup.contentSize, carried: &carried) }
                 let range = lm.glyphRange(for: tc)
-                pages.append((lm, tc))
+                pages.append(page)
                 guardCount += 1
                 if NSMaxRange(range) >= lm.numberOfGlyphs || guardCount > 5000 { break }
                 // An element taller than the page can make no progress; stop instead of looping forever.
                 if range.length == 0 { break }
             }
         }
+        // Notes still waiting after the last page get pages of their own.
+        var noteGuard = 0
+        while carried.length > 0, noteGuard < 1000 {
+            noteGuard += 1
+            let fit = fitNotes(carried, width: setup.contentSize.width, height: setup.contentSize.height)
+            pages.append(Page(notes: fit.notes))
+            carried = fit.rest
+            if fit.notes == nil { break }
+        }
 
         let total = pages.count
-        for (lm, tc) in pages {
+        for page in pages {
             ctx.beginPDFPage(nil)
             NSGraphicsContext.saveGraphicsState()
             let nsctx = NSGraphicsContext(cgContext: ctx, flipped: true)
@@ -66,11 +84,30 @@ public enum PDFRenderer {
             ctx.saveGState()
             ctx.translateBy(x: 0, y: setup.size.height)
             ctx.scaleBy(x: 1, y: -1)
-            let range = lm.glyphRange(for: tc)
             let origin = CGPoint(x: setup.margins.left, y: setup.margins.top)
-            if range.length > 0 {
-                lm.drawBackground(forGlyphRange: range, at: origin)
-                lm.drawGlyphs(forGlyphRange: range, at: origin)
+            if let lm = page.lm, let tc = page.tc {
+                let range = lm.glyphRange(for: tc)
+                if range.length > 0 {
+                    lm.drawBackground(forGlyphRange: range, at: origin)
+                    lm.drawGlyphs(forGlyphRange: range, at: origin)
+                }
+            }
+            if let notes = page.notes {
+                // Bottom-aligned in the text area, under a short rule, like Word's footnote separator; a page holding
+                // only notes carried over starts at the top.
+                let top = page.lm == nil ? setup.margins.top : setup.margins.top + setup.contentSize.height - notes.height
+                if page.lm != nil {
+                    ctx.saveGState()
+                    ctx.setStrokeColor(NSColor(white: 0.55, alpha: 1).cgColor)
+                    ctx.setLineWidth(0.5)
+                    ctx.move(to: CGPoint(x: setup.margins.left, y: top - 5))
+                    ctx.addLine(to: CGPoint(x: setup.margins.left + min(144, setup.contentSize.width / 3), y: top - 5))
+                    ctx.strokePath()
+                    ctx.restoreGState()
+                }
+                let nOrigin = CGPoint(x: setup.margins.left, y: top)
+                notes.lm.drawBackground(forGlyphRange: notes.glyphs, at: nOrigin)
+                notes.lm.drawGlyphs(forGlyphRange: notes.glyphs, at: nOrigin)
             }
             pageIndex += 1
             if pageNumbers && total > 1 {
@@ -87,6 +124,94 @@ public enum PDFRenderer {
         ctx.closePDF()
         _ = storages
         return data as Data
+    }
+
+    /// A page: body text (a container of a layout manager) and/or the footnotes set at its foot.
+    struct Page {
+        var lm: NSLayoutManager?
+        var tc: NSTextContainer?
+        var notes: Notes?
+    }
+
+    /// Footnote text laid out for one page: draw `glyphs` of `lm`; `height` is what it uses.
+    struct Notes {
+        let storage: NSTextStorage
+        let lm: NSLayoutManager
+        let glyphs: NSRange
+        let height: CGFloat
+    }
+
+    /// Gap between the body text and the notes, room for the separator rule.
+    static let noteGap: CGFloat = 12
+
+    /// Shrinks the page's text container until the footnotes of the marks on it (after any carried over from the
+    /// previous page) fit below the text, and returns them laid out. The container only ever shrinks, so a mark that
+    /// moves to the next page takes its note along and the space reserved always holds the notes that stay. Notes
+    /// take at most half the page; what does not fit is carried to the next page, as Word does.
+    static func placeFootnotes(_ lm: NSLayoutManager, _ tc: NSTextContainer, _ content: CGSize,
+                               carried: inout NSAttributedString) -> Notes? {
+        func notes(on glyphs: NSRange) -> [NSAttributedString] {
+            guard let storage = lm.textStorage, glyphs.length > 0 else { return [] }
+            let chars = lm.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+            var out: [NSAttributedString] = []
+            storage.enumerateAttribute(.ensoFootnote, in: chars) { v, _, _ in if let a = v as? NSAttributedString { out.append(a) } }
+            return out
+        }
+        func joined(_ list: [NSAttributedString]) -> NSAttributedString {
+            let s = NSMutableAttributedString(attributedString: carried)
+            for a in list { s.append(a) }
+            return s
+        }
+        let maxArea = content.height * 0.5
+        var list = notes(on: lm.glyphRange(for: tc))
+        if list.isEmpty && carried.length == 0 { return nil }
+        var height = content.height
+        for _ in 0..<8 {
+            let needed = min(measure(joined(list), width: content.width), maxArea)
+            let target = max(content.height - needed - noteGap, content.height - maxArea - noteGap)
+            if target >= height - 0.5 { break }
+            height = target
+            tc.size = CGSize(width: content.width, height: height)
+            let again = notes(on: lm.glyphRange(for: tc))
+            if again.count == list.count { break }
+            list = again
+        }
+        let fit = fitNotes(joined(list), width: content.width, height: content.height - height - noteGap)
+        carried = fit.rest
+        return fit.notes
+    }
+
+    /// Lays out note text in the given area: the part that fits, and the rest (empty when everything fits).
+    static func fitNotes(_ text: NSAttributedString, width: CGFloat, height: CGFloat) -> (notes: Notes?, rest: NSAttributedString) {
+        guard text.length > 0, height > 1 else { return (nil, text) }
+        let storage = NSTextStorage(attributedString: text)
+        let lm = NSLayoutManager()
+        lm.usesFontLeading = true
+        storage.addLayoutManager(lm)
+        let tc = NSTextContainer(size: CGSize(width: width, height: height))
+        tc.lineFragmentPadding = 0
+        lm.addTextContainer(tc)
+        let glyphs = lm.glyphRange(for: tc)
+        let chars = lm.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        let used = lm.usedRect(for: tc).height
+        let rest = NSMaxRange(chars) < text.length
+            ? text.attributedSubstring(from: NSRange(location: NSMaxRange(chars), length: text.length - NSMaxRange(chars)))
+            : NSAttributedString()
+        if glyphs.length == 0 { return (nil, text) }
+        return (Notes(storage: storage, lm: lm, glyphs: glyphs, height: used), rest)
+    }
+
+    static func measure(_ text: NSAttributedString, width: CGFloat) -> CGFloat {
+        guard text.length > 0 else { return 0 }
+        let storage = NSTextStorage(attributedString: text)
+        let lm = NSLayoutManager()
+        lm.usesFontLeading = true
+        storage.addLayoutManager(lm)
+        let tc = NSTextContainer(size: CGSize(width: width, height: .greatestFiniteMagnitude))
+        tc.lineFragmentPadding = 0
+        lm.addTextContainer(tc)
+        lm.ensureLayout(for: tc)
+        return ceil(lm.usedRect(for: tc).height)
     }
 
     /// Splits at paragraphs carrying `.ensoPageBreak`.

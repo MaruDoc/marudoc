@@ -2,8 +2,8 @@ import Foundation
 import CoreGraphics
 import EnsoDoc
 
-/// WordprocessingML (.docx) -> DocModel. Headers, footers, footnotes and comments are not part of the body
-/// and are skipped; DocxInspector reports their presence.
+/// WordprocessingML (.docx) -> DocModel. Headers, footers and comments are not part of the body and are skipped;
+/// DocxInspector reports their presence. Footnotes and endnotes become `DocModel.notes` with marks in the text.
 public enum DocxReader {
     public static func read(_ url: URL) throws -> DocModel {
         try read(data: try Data.readOffice(url))
@@ -39,13 +39,16 @@ struct DocxRunProps {
     var highlight: String?   // hex or "none"
     var font: String?, eastAsiaFont: String?
     var code: Bool?
+    /// w:vertAlign: "superscript", "subscript" or "baseline".
+    var vertAlign: String?
 
     /// `self` wins over `base` where set.
     func over(_ base: DocxRunProps) -> DocxRunProps {
         DocxRunProps(bold: bold ?? base.bold, italic: italic ?? base.italic, underline: underline ?? base.underline,
                      strike: strike ?? base.strike, hidden: hidden ?? base.hidden, size: size ?? base.size,
                      color: color ?? base.color, highlight: highlight ?? base.highlight, font: font ?? base.font,
-                     eastAsiaFont: eastAsiaFont ?? base.eastAsiaFont, code: code ?? base.code)
+                     eastAsiaFont: eastAsiaFont ?? base.eastAsiaFont, code: code ?? base.code,
+                     vertAlign: vertAlign ?? base.vertAlign)
     }
 }
 
@@ -61,7 +64,9 @@ private struct DocxStyle {
     var alignment: DocAlignment?
 }
 
-private struct NumLevel { var format: String; var start: Int }
+/// One level of a numbering definition: number format, start value, level text ("%1.", "(%1)", "第%1条", or the bullet
+/// character), legal-style numbering (all levels decimal) and the bullet's font (symbol fonts are mapped to Unicode).
+private struct NumLevel { var format: String; var start: Int; var text: String? = nil; var legal = false; var font: String? = nil }
 
 private enum ParaKind { case heading(Int, title: Bool), code, quote, list(ordered: Bool, level: Int, numId: Int), plain }
 
@@ -88,6 +93,18 @@ private final class DocxParser {
     /// Complex field state: one entry per open fldChar begin; `link` is set once the instruction is known.
     var fieldStack: [(instr: String, inResult: Bool, link: String?)] = []
 
+    /// Footnote and endnote parts: note id -> its w:footnote / w:endnote element, and the part's own relationships
+    /// (links inside a note resolve against them, not against the body's).
+    var noteParts: [DocNote.Kind: (notes: [String: XNode], rels: [String: OPCRelationship])] = [:]
+    var notes: [DocNote] = []
+    /// "footnote:<w:id>" -> DocNote.id, so a note is read once.
+    var noteIDs: [String: Int] = [:]
+    var noteCounters: [DocNote.Kind: Int] = [:]
+    /// Number format and start of each kind; Word's defaults unless settings.xml says otherwise.
+    var noteFormats: [DocNote.Kind: (format: String, start: Int)] = [.footnote: ("decimal", 1), .endnote: ("lowerRoman", 1)]
+    /// True while a note's own content is read: a reference inside a note is not followed (no recursion).
+    var readingNote = false
+
     init(zip: ZipReader) { self.zip = zip }
 
     func parse() throws -> DocModel {
@@ -103,6 +120,28 @@ private final class DocxParser {
         if let nb = relList.first(where: { $0.isType("numbering") }), zip.contains(nb.target) {
             parseNumbering(try XNode.parse(try zip.data(nb.target), part: nb.target))
         }
+        // Notes are optional content: a damaged notes part costs the notes, never the document.
+        for (kind, type) in [(DocNote.Kind.footnote, "footnotes"), (.endnote, "endnotes")] {
+            guard let rel = relList.first(where: { $0.isType(type) }), zip.contains(rel.target),
+                  let root = try? XNode.parse(try zip.data(rel.target), part: rel.target) else { continue }
+            var byId: [String: XNode] = [:]
+            // Separators and continuation notices (w:type set) are layout, not notes.
+            for n in root.children where (n.tag == "w:footnote" || n.tag == "w:endnote") && (n["w:type"] ?? "normal") == "normal" {
+                if let id = n["w:id"] { byId[id] = n }
+            }
+            var noteRels: [String: OPCRelationship] = [:]
+            for r in (try? OPC.relationships(zip, for: rel.target)) ?? [] { noteRels[r.id] = r }
+            noteParts[kind] = (byId, noteRels)
+        }
+        if !noteParts.isEmpty, let st = relList.first(where: { $0.isType("settings") }), let d = try? zip.data(st.target),
+           let root = try? XNode.parse(d, part: st.target) {
+            for (kind, tag) in [(DocNote.Kind.footnote, "w:footnotePr"), (.endnote, "w:endnotePr")] {
+                guard let pr = root.child(tag), var f = noteFormats[kind] else { continue }
+                if let fmt = pr.child("w:numFmt")?["w:val"] { f.format = fmt }
+                if let start = OOXMLValue.int(pr.child("w:numStart")?["w:val"]) { f.start = OOXMLValue.clamp(start, 0, 32767) }
+                noteFormats[kind] = f
+            }
+        }
 
         let doc = try XNode.parse(try zip.data(mainPart), part: mainPart)
         guard doc.tag == "w:document" else { throw OfficeError.invalidDocument("\(mainPart) is not a Word document") }
@@ -110,7 +149,7 @@ private final class DocxParser {
         for child in blockChildren(body) { readBlock(child, into: &blocks) }
 
         return DocModel(title: OPC.coreTitle(zip) ?? titleFromStyle, blocks: blocks, pageSize: pageSize,
-                        bodyFontSize: bodySize, bodyFontName: bodyRun.font)
+                        bodyFontSize: bodySize, bodyFontName: bodyRun.font, notes: notes, bodyEastAsianFontName: bodyRun.eastAsiaFont)
     }
 
     // MARK: Styles, numbering, theme
@@ -164,7 +203,10 @@ private final class DocxParser {
             for l in a.children("w:lvl") {
                 guard let ilvl = OOXMLValue.int(l["w:ilvl"]) else { continue }
                 levels[ilvl] = NumLevel(format: l.child("w:numFmt")?["w:val"] ?? "decimal",
-                                        start: OOXMLValue.clamp(OOXMLValue.int(l.child("w:start")?["w:val"]) ?? 1, 0, 32767))
+                                        start: OOXMLValue.clamp(OOXMLValue.int(l.child("w:start")?["w:val"]) ?? 1, 0, 32767),
+                                        text: l.child("w:lvlText")?["w:val"],
+                                        legal: l.child("w:isLgl").map { OOXMLValue.onOff($0["w:val"]) } ?? false,
+                                        font: l.child("w:rPr")?.child("w:rFonts").flatMap { $0["w:ascii"] ?? $0["w:hAnsi"] })
             }
             abstractNums[id] = (levels, a.child("w:numStyleLink")?["w:val"])
         }
@@ -238,6 +280,7 @@ private final class DocxParser {
                 else if let t = c["w:asciiTheme"] ?? c["w:hAnsiTheme"], let f = themeFonts[t] { p.font = f }
                 if let f = c["w:eastAsia"] { p.eastAsiaFont = f }
                 else if let t = c["w:eastAsiaTheme"], let f = themeFonts[t] { p.eastAsiaFont = f }
+            case "w:vertAlign": p.vertAlign = c["w:val"]
             case "w:rStyle":
                 if let id = c["w:val"] { p = p.over(resolvedRun(style: id)) }
             default: break
@@ -362,9 +405,11 @@ private final class DocxParser {
         }
 
         var listNumber: Int?
+        var listMarker: (marker: String?, numbering: DocListNumbering?) = (nil, nil)
         if case .list(let ordered, let level, let numId) = kind {
             let n = nextNumber(numId: numId, level: level)
             if ordered { listNumber = n }
+            listMarker = marker(numId: numId, level: level)
         }
 
         // A paragraph without visible content is either a blank line inside a code block or,
@@ -399,7 +444,8 @@ private final class DocxParser {
                 else { out.append(.code(text, language: nil)) }
             case .quote: out.append(.quote(para))
             case .list(let ordered, let level, _):
-                out.append(.listItem(DocListItem(ordered: ordered, level: level, number: listNumber, paragraph: para)))
+                out.append(.listItem(DocListItem(ordered: ordered, level: level, number: listNumber, paragraph: para,
+                                                 marker: listMarker.marker, numbering: listMarker.numbering)))
             case .plain: out.append(.paragraph(para))
             }
         }
@@ -438,6 +484,120 @@ private final class DocxParser {
         return n
     }
 
+    /// The marker Word shows for the item just counted by `nextNumber`: the level text with each %k replaced by level
+    /// k's counter in level k's number format ("(%1)" -> "(2)", "%1.%2" -> "1.3", "第%1条" -> "第１条"), and for bullets
+    /// the level text itself with symbol-font characters mapped to Unicode. nil where it is the writers' default
+    /// ("1." for a decimal "%1.", a plain round bullet), so ordinary lists come out exactly as before.
+    func marker(numId: Int, level: Int) -> (marker: String?, numbering: DocListNumbering?) {
+        guard let lvl = numLevel(numId: numId, ilvl: level), let text = lvl.text else { return (nil, nil) }
+        if lvl.format == "bullet" {
+            let mark = DocxSymbols.mapText(text, font: lvl.font).trimmingCharacters(in: .whitespaces)
+            return (mark.isEmpty || DocxParser.plainBullets.contains(mark) ? nil : mark, nil)
+        }
+        let c = counters[numId] ?? []
+        var out = ""
+        var chars = text.makeIterator()
+        while let ch = chars.next() {
+            guard ch == "%" else { out.append(ch); continue }
+            guard let d = chars.next() else { out.append(ch); break }
+            guard let k = d.wholeNumberValue, (1...9).contains(k) else { out.append(ch); out.append(d); continue }
+            let ref = numLevel(numId: numId, ilvl: k - 1)
+            let value = (k - 1 < c.count ? c[k - 1] : nil) ?? ref?.start ?? 1
+            out += DocxParser.formatNumber(value, format: lvl.legal ? "decimal" : (ref?.format ?? "decimal"))
+        }
+        let n = (level < c.count ? c[level] : nil) ?? 1
+        if out == "\(n)." { return (nil, nil) }
+        return (out, DocListNumbering(format: lvl.format, pattern: text))
+    }
+
+    static let plainBullets: Set<String> = ["•", "·", "∙", "●", "○", "◦", "o", "-", "–", "・"]
+
+    /// A number in an OOXML number format (ST_NumberFormat). Formats not listed print as decimal.
+    static func formatNumber(_ n: Int, format: String) -> String {
+        func roman(_ v: Int) -> String? {
+            guard (1...3999).contains(v) else { return nil }
+            let table: [(Int, String)] = [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+                                          (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
+            var v = v, s = ""
+            for (k, r) in table { while v >= k { s += r; v -= k } }
+            return s
+        }
+        func letters(_ v: Int, _ base: UInt32) -> String? {
+            // Word: A…Z, then AA…ZZ, AAA… (the same letter repeated).
+            guard v >= 1, v <= 26 * 50 else { return nil }
+            return String(repeating: String(UnicodeScalar(base + UInt32((v - 1) % 26))!), count: (v - 1) / 26 + 1)
+        }
+        func fromList(_ v: Int, _ list: [Character]) -> String? {
+            guard v >= 1 else { return nil }
+            return String(list[(v - 1) % list.count])
+        }
+        func ideographDigits(_ v: Int) -> String? {
+            guard v >= 0 else { return nil }
+            let d: [Character] = ["〇", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
+            return String(String(v).compactMap { $0.wholeNumberValue.map { d[$0] } })
+        }
+        func counting(_ v: Int, _ digits: [String], _ ten: String) -> String? {
+            // 一, 十, 十一, 二十三, 百五, 千二百: the usual Japanese counting form up to 9999.
+            guard (1...9999).contains(v) else { return nil }
+            var s = ""
+            for (unit, name) in [(1000, "千"), (100, "百"), (10, ten)] {
+                let q = (v / unit) % 10
+                if q == 0 { continue }
+                s += (q == 1 ? "" : digits[q]) + name
+            }
+            if v % 10 > 0 { s += digits[v % 10] }
+            return s
+        }
+        let kanji = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
+        let result: String?
+        switch format {
+        case "decimalZero": result = n >= 0 && n < 10 ? "0\(n)" : nil
+        case "decimalFullWidth", "decimalFullWidth2":
+            result = n >= 0 ? String(String(n).unicodeScalars.map { Character(UnicodeScalar($0.value - 0x30 + 0xFF10)!) }) : nil
+        case "decimalEnclosedCircle", "decimalEnclosedCircleChinese":
+            switch n {
+            case 1...20: result = String(UnicodeScalar(0x2460 + UInt32(n - 1))!)
+            case 21...35: result = String(UnicodeScalar(0x3251 + UInt32(n - 21))!)
+            case 36...50: result = String(UnicodeScalar(0x32B1 + UInt32(n - 36))!)
+            default: result = nil
+            }
+        case "decimalEnclosedFullstop": result = (1...20).contains(n) ? String(UnicodeScalar(0x2488 + UInt32(n - 1))!) : "\(n)."
+        case "decimalEnclosedParen": result = (1...20).contains(n) ? String(UnicodeScalar(0x2474 + UInt32(n - 1))!) : "(\(n))"
+        case "upperRoman": result = roman(n)
+        case "lowerRoman": result = roman(n)?.lowercased()
+        case "upperLetter": result = letters(n, 0x41)
+        case "lowerLetter": result = letters(n, 0x61)
+        case "aiueo": result = fromList(n, Array(DocxParser.aiueoHalf))
+        case "aiueoFullWidth": result = fromList(n, Array(DocxParser.aiueo))
+        case "iroha": result = fromList(n, Array(DocxParser.iroha).map { DocxParser.halfWidthKana[$0] ?? $0 })
+        case "irohaFullWidth": result = fromList(n, Array(DocxParser.iroha))
+        case "ideographDigital", "japaneseDigitalTenThousand": result = ideographDigits(n)
+        case "japaneseCounting", "chineseCounting", "chineseCountingThousand", "taiwaneseCounting", "taiwaneseCountingThousand":
+            result = counting(n, kanji, "十")
+        case "japaneseLegal": result = counting(n, ["", "壱", "弐", "参", "四", "伍", "六", "七", "八", "九"], "拾")
+        case "ideographTraditional": result = fromList(n, Array("甲乙丙丁戊己庚辛壬癸"))
+        case "ideographZodiac": result = fromList(n, Array("子丑寅卯辰巳午未申酉戌亥"))
+        case "ordinal":
+            let suffix: String
+            switch (n % 100, n % 10) {
+            case (11...13, _): suffix = "th"
+            case (_, 1): suffix = "st"
+            case (_, 2): suffix = "nd"
+            case (_, 3): suffix = "rd"
+            default: suffix = "th"
+            }
+            result = "\(n)\(suffix)"
+        case "none": result = ""
+        default: result = nil
+        }
+        return result ?? String(n)
+    }
+
+    static let aiueo = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン"
+    static let aiueoHalf = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜｦﾝ"
+    static let iroha = "イロハニホヘトチリヌルヲワカヨタレソツネナラムウヰノオクヤマケフコエテアサキユメミシヱヒモセス"
+    static let halfWidthKana: [Character: Character] = Dictionary(uniqueKeysWithValues: Swift.zip(aiueo, aiueoHalf))
+
     // MARK: Inline level
 
     private func collectInline(_ n: XNode, base: DocxRunProps, link: String?, into pieces: inout [Piece]) {
@@ -456,7 +616,11 @@ private final class DocxParser {
             case "w:sdt":
                 if let content = c.child("w:sdtContent") { collectInline(content, base: base, link: link, into: &pieces) }
             case "w:ruby":
-                if let rb = c.child("w:rubyBase") { collectInline(rb, base: base, link: link, into: &pieces) }
+                readRuby(c, base: base, link: link, into: &pieces)
+            case "m:oMath", "m:oMathPara":
+                // Equations as linear text where they stand; typesetting is out of reach, losing them is not.
+                let text = DocxMath.linear(c)
+                if !text.isEmpty { pieces.append(.run(makeRun(text, base, link: link ?? fieldLink))) }
             case "mc:AlternateContent":
                 alternate(c) { collectInline($0, base: base, link: link, into: &pieces) }
             default:
@@ -533,6 +697,17 @@ private final class DocxParser {
                 if type == "page" { emitText(); pieces.append(.pageBreak) } else { text += "\n" }
             case "w:cr": text += "\n"
             case "w:noBreakHyphen": text += "\u{2011}"
+            case "w:sym":
+                if fieldStack.last.map({ !$0.inResult }) ?? false { continue }
+                text += DocxSymbols.symbol(c["w:char"], font: c["w:font"] ?? props.font)
+            case "w:ruby":
+                emitText()
+                readRuby(c, base: props, link: currentLink, into: &pieces)
+            case "w:footnoteReference", "w:endnoteReference":
+                emitText()
+                if let mark = noteReference(c, kind: c.tag == "w:footnoteReference" ? .footnote : .endnote, props: props, link: currentLink) {
+                    pieces.append(.run(mark))
+                }
             case "w:fldChar":
                 emitText()
                 switch c["w:fldCharType"] {
@@ -568,8 +743,74 @@ private final class DocxParser {
         emitText()
     }
 
+    /// A ruby group: the base text (with the base run's formatting) carrying the reading. A base without text keeps
+    /// the reading as plain text, so nothing written in the source is lost.
+    private func readRuby(_ ruby: XNode, base: DocxRunProps, link: String?, into pieces: inout [Piece]) {
+        var baseParts: [Piece] = [], readingParts: [Piece] = []
+        if let rb = ruby.child("w:rubyBase") { collectInline(rb, base: base, link: link, into: &baseParts) }
+        if let rt = ruby.child("w:rt") { collectInline(rt, base: base, link: link, into: &readingParts) }
+        let reading = readingParts.compactMap { piece -> String? in if case .run(let r) = piece { return r.text }; return nil }.joined()
+        let runs = baseParts.compactMap { piece -> DocRun? in if case .run(let r) = piece { return r }; return nil }
+        if var first = runs.first {
+            first.text = runs.map(\.text).joined()
+            if !reading.trimmingCharacters(in: .whitespaces).isEmpty { first.ruby = reading }
+            pieces.append(.run(first))
+        } else if !reading.isEmpty {
+            pieces.append(.run(makeRun(reading, base, link: link)))
+        }
+        for piece in baseParts { if case .run = piece { continue }; pieces.append(piece) }
+    }
+
+    /// A footnote or endnote mark: reads the note on first use (numbered in mark order, like Word) and returns the
+    /// superscript mark run that points to it. nil when the note does not exist, is hidden, or the mark sits inside
+    /// another note.
+    private func noteReference(_ ref: XNode, kind: DocNote.Kind, props: DocxRunProps, link: String?) -> DocRun? {
+        guard !readingNote, props.hidden != true, let id = ref["w:id"], let part = noteParts[kind], let node = part.notes[id] else { return nil }
+        let key = "\(kind.rawValue):\(id)"
+        let note: DocNote
+        if let known = noteIDs[key], let existing = notes.first(where: { $0.id == known }) {
+            note = existing
+        } else {
+            let n = (noteCounters[kind] ?? 0) + 1
+            noteCounters[kind] = n
+            let f = noteFormats[kind] ?? ("decimal", 1)
+            let label = DocxParser.formatNumber(f.start + n - 1, format: f.format)
+            // The note is read with its own part's relationships and a clean field state; the body's are restored.
+            let savedRels = rels, savedFields = fieldStack
+            rels = part.rels; fieldStack = []; readingNote = true
+            var inner: [DocBlock] = []
+            for c in blockChildren(node) { readBlock(c, into: &inner) }
+            rels = savedRels; fieldStack = savedFields; readingNote = false
+            var paras = DocxParser.flatten(inner)
+            // The note's own number (w:footnoteRef) is not text; drop the space Word puts after it.
+            if !paras.isEmpty {
+                var runs = paras[0].runs
+                while let first = runs.first, first.image == nil, first.noteID == nil {
+                    let t = String(first.text.drop(while: { $0 == " " || $0 == "\t" || $0 == "\u{3000}" }))
+                    if t.isEmpty { runs.removeFirst() } else { runs[0].text = t; break }
+                }
+                paras[0].runs = runs
+            }
+            note = DocNote(id: notes.count + 1, kind: kind, label: label, paragraphs: paras.filter { !$0.isEmpty })
+            notes.append(note)
+            noteIDs[key] = note.id
+        }
+        var mark = makeRun(note.label, props, link: link)
+        mark.baseline = .superscript
+        mark.noteID = note.id
+        return mark
+    }
+
     private func makeRun(_ text: String, _ p: DocxRunProps, link: String?) -> DocRun {
-        var run = DocRun(text)
+        // Text in a symbol font (Wingdings check marks, Symbol Greek) is shown by Word as the font's glyph: carry the
+        // Unicode character it stands for, not the letter that selects it.
+        let symbolFont = DocxSymbols.isSymbolFont(p.font) && !text.unicodeScalars.contains { $0.value >= 0x2E80 && !(0xF000...0xF0FF).contains($0.value) }
+        var run = DocRun(symbolFont ? DocxSymbols.mapText(text, font: p.font) : text)
+        switch p.vertAlign {
+        case "superscript": run.baseline = .superscript
+        case "subscript": run.baseline = .subscript
+        default: break
+        }
         run.bold = p.bold ?? false
         run.italic = p.italic ?? false
         run.underline = (p.underline ?? false) && link == nil
@@ -584,7 +825,7 @@ private final class DocxParser {
         let usesEA = text.unicodeScalars.contains { $0.value >= 0x2E80 }
         let font = usesEA ? (p.eastAsiaFont ?? p.font) : p.font
         let bodyFont = usesEA ? (bodyRun.eastAsiaFont ?? bodyRun.font) : bodyRun.font
-        if let f = font, f != bodyFont, !run.code { run.fontName = f }
+        if let f = font, f != bodyFont, !run.code, !symbolFont { run.fontName = f }
         if let link, let url = DocxParser.absoluteLink(link) { run.link = url }
         return run
     }
@@ -670,10 +911,14 @@ private final class DocxParser {
         var stillHeader = true
         let grid = tbl.child("w:tblGrid")?.children("w:gridCol").compactMap { OOXMLValue.twips($0["w:w"]) } ?? []
 
+        // Vertical merges: "restart" opens a merged cell, "continue" cells below it are covered. Covered cells stay as
+        // empty placeholders; the opening cell gets the row span (counted per grid column below).
+        var merges: [[(col: Int, restart: Bool, covered: Bool)]] = []
         for tr in blockChildren(tbl) where tr.tag == "w:tr" {
             let isHeader = tr.child("w:trPr")?.child("w:tblHeader").map { OOXMLValue.onOff($0["w:val"]) } ?? false
             if stillHeader && isHeader { headerRows += 1 } else { stillHeader = false }
             var cells: [DocTableCell] = []
+            var rowMerges: [(col: Int, restart: Bool, covered: Bool)] = []
             for tc in blockChildren(tr) where tc.tag == "w:tc" {
                 let tcPr = tc.child("w:tcPr")
                 if tcPr?.child("w:hMerge").map({ ($0["w:val"] ?? "continue") == "continue" }) ?? false, !cells.isEmpty {
@@ -681,18 +926,27 @@ private final class DocxParser {
                     continue
                 }
                 let span = max(OOXMLValue.int(tcPr?.child("w:gridSpan")?["w:val"]) ?? 1, 1)
-                let vContinue = tcPr?.child("w:vMerge").map { ($0["w:val"] ?? "continue") == "continue" } ?? false
+                let vMerge = tcPr?.child("w:vMerge").map { $0["w:val"] ?? "continue" }
+                let vContinue = vMerge == "continue"
                 var paras: [DocParagraph] = []
                 if !vContinue {
                     var inner: [DocBlock] = []
                     for c in blockChildren(tc) { readBlock(c, into: &inner) }
                     paras = DocxParser.flatten(inner)
                 }
+                rowMerges.append((cells.reduce(0) { $0 + $1.colSpan }, vMerge == "restart", vContinue))
                 cells.append(DocTableCell(paras, colSpan: min(span, 1000)))
             }
-            if !cells.isEmpty { rows.append(cells) }
+            if !cells.isEmpty { rows.append(cells); merges.append(rowMerges) }
         }
         guard !rows.isEmpty else { return nil }
+        for r in rows.indices {
+            for i in rows[r].indices where merges[r][i].restart {
+                var span = 1
+                while r + span < rows.count, merges[r + span].contains(where: { $0.covered && $0.col == merges[r][i].col }) { span += 1 }
+                rows[r][i].rowSpan = span
+            }
+        }
         if headerRows == 0, rows.count > 1 {
             let runs = rows[0].flatMap { $0.paragraphs.flatMap(\.runs) }.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
             if !runs.isEmpty && runs.allSatisfy(\.bold) { headerRows = 1 }
@@ -701,7 +955,8 @@ private final class DocxParser {
         return DocTable(rows: rows, headerRows: headerRows, columnWidths: grid.count == colCount && grid.allSatisfy { $0 > 0 } ? grid : nil)
     }
 
-    /// Cell content as plain paragraphs (cells cannot hold lists, nested tables or images in DocModel).
+    /// Cell (and note) content as paragraphs: cells cannot hold lists or nested tables in DocModel, so those become
+    /// text; a picture becomes a paragraph holding it as an inline picture run.
     static func flatten(_ blocks: [DocBlock]) -> [DocParagraph] {
         var out: [DocParagraph] = []
         for b in blocks {
@@ -709,13 +964,13 @@ private final class DocxParser {
             case .heading(_, let p), .paragraph(let p), .quote(let p): out.append(p)
             case .listItem(let li):
                 var p = li.paragraph
-                let marker = li.ordered ? "\(li.number ?? 1). " : "• "
+                let marker = li.markerText(bullet: "•") + " "
                 p.runs.insert(DocRun(String(repeating: "  ", count: li.level) + marker), at: 0)
                 out.append(p)
             case .code(let s, _): out.append(DocParagraph([DocRun(s, code: true)]))
             case .table(let t):
                 for row in t.rows { out.append(DocParagraph(text: row.map(\.text).joined(separator: "\t"))) }
-            case .image(let img): if let alt = img.altText, !alt.isEmpty { out.append(DocParagraph(text: alt)) }
+            case .image(let img): out.append(DocParagraph([DocRun(img.altText ?? "", image: img)]))
             case .pageBreak, .horizontalRule: break
             }
         }
@@ -725,4 +980,193 @@ private final class DocxParser {
 
 private extension ParaKind {
     var isCode: Bool { if case .code = self { return true }; return false }
+}
+
+// MARK: - Symbol fonts
+
+/// Characters of the classic symbol fonts as Unicode. Word stores them as the font's code (w:sym w:char="F0FC", or
+/// text "ü" in Wingdings); without the mapping a check mark becomes nothing or a stray letter. Codes a table does not
+/// know become U+FFFD, a visible placeholder.
+enum DocxSymbols {
+    static let placeholder = "\u{FFFD}"
+
+    static func table(_ font: String?) -> [UInt32: String]? {
+        guard let f = font?.trimmingCharacters(in: .whitespaces).lowercased() else { return nil }
+        switch f {
+        case "wingdings": return wingdings
+        case "wingdings 2": return wingdings2
+        case "webdings": return webdings
+        case "symbol": return symbol
+        default: return nil
+        }
+    }
+
+    static func isSymbolFont(_ font: String?) -> Bool { table(font) != nil }
+
+    /// w:sym: `char` is hex, in the font's own code (F0xx or 00xx) for symbol fonts, otherwise a Unicode code point.
+    static func symbol(_ char: String?, font: String?) -> String {
+        guard let hex = char, let code = UInt32(hex, radix: 16) else { return placeholder }
+        let low = (0xF000...0xF0FF).contains(code) ? code - 0xF000 : code
+        if let t = table(font) { return low < 0x100 ? (t[low] ?? placeholder) : character(code) }
+        // Not a known symbol font: a private-use code means a glyph only that font has.
+        return (0xF000...0xF0FF).contains(code) ? placeholder : character(code)
+    }
+
+    private static func character(_ code: UInt32) -> String {
+        guard code >= 0x20, let u = UnicodeScalar(code), !(0xE000...0xF8FF).contains(code) else { return placeholder }
+        return String(u)
+    }
+
+    /// Text set in a symbol font: each code (plain or F0xx) through the font's table; other characters unchanged.
+    static func mapText(_ s: String, font: String?) -> String {
+        guard let t = table(font) else { return s }
+        var out = ""
+        for u in s.unicodeScalars {
+            let low = (0xF000...0xF0FF).contains(u.value) ? u.value - 0xF000 : u.value
+            if low < 0x100, low >= 0x20 { out += t[low] ?? placeholder } else { out.unicodeScalars.append(u) }
+        }
+        return out
+    }
+
+    private static func range(_ start: UInt32, _ chars: String) -> [UInt32: String] {
+        var d: [UInt32: String] = [:]
+        for (i, c) in chars.enumerated() where c != "_" { d[start + UInt32(i)] = String(c) }
+        return d
+    }
+
+    /// Wingdings (Unicode's Wingdings mapping; arrows outside the BMP use the BMP arrow of the same direction).
+    static let wingdings: [UInt32: String] = {
+        var d: [UInt32: String] = [0x20: " ", 0xA0: " "]
+        d.merge([0x22: "✂", 0x23: "✁", 0x28: "☎", 0x29: "✆", 0x2A: "✉", 0x36: "⌛", 0x3E: "✇", 0x3F: "✍", 0x41: "✌", 0x45: "☜", 0x46: "☞", 0x47: "☝",
+                 0x48: "☟", 0x49: "✋", 0x4A: "☺", 0x4C: "☹", 0x4E: "☠", 0x51: "✈", 0x52: "☼", 0x54: "❄", 0x56: "✞",
+                 0x58: "✠", 0x59: "✡", 0x5A: "☪", 0x5B: "☯", 0x5C: "ॐ", 0x5D: "☸"], uniquingKeysWith: { $1 })
+        d.merge(range(0x5E, "♈♉♊♋♌♍♎♏♐♑♒♓"), uniquingKeysWith: { $1 })
+        d.merge(range(0x6C, "●❍■□□❑❒⬧⧫◆❖⬥⌧_⌘"), uniquingKeysWith: { $1 })
+        d.merge(range(0x80, "⓪①②③④⑤⑥⑦⑧⑨⑩⓿❶❷❸❹❺❻❼❽❾❿"), uniquingKeysWith: { $1 })
+        d.merge(range(0x9E, "·•▪○__◉◎_▪◻_✦★✶✴✹✵_⌖⟡⌑_✪✰"), uniquingKeysWith: { $1 })
+        d.merge([0xD5: "⌫", 0xD6: "⌦", 0xD8: "➢"], uniquingKeysWith: { $1 })
+        d.merge(range(0xDF, "←→↑↓↖↗↙↘⬅➡⬆⬇⬉⬈⬋⬊⇦⇨⇧⇩⬄⇳⬀⬁⬃⬂▭▫✗✓☒☑"), uniquingKeysWith: { $1 })
+        return d
+    }()
+
+    /// Wingdings 2: the form characters (check marks, crossed and checked boxes, the empty box).
+    static let wingdings2: [UInt32: String] = [0x20: " ", 0xA0: " ", 0x4F: "✗", 0x50: "✓", 0x51: "☒", 0x52: "☑",
+                                               0x53: "☒", 0x54: "☒", 0xA3: "□"]
+
+    static let webdings: [UInt32: String] = [0x20: " ", 0xA0: " ", 0x61: "✓", 0x72: "✕"]
+
+    /// Symbol (Adobe Symbol encoding): ASCII punctuation and digits as themselves except where Symbol differs,
+    /// Greek for the letters, mathematical signs above 0xA0.
+    static let symbol: [UInt32: String] = {
+        var d: [UInt32: String] = [:]
+        for c in UInt32(0x20)...0x3F { d[c] = String(UnicodeScalar(c)!) }
+        d.merge([0x22: "∀", 0x24: "∃", 0x27: "∋", 0x2A: "∗", 0x2D: "−", 0x40: "≅", 0x5B: "[", 0x5C: "∴", 0x5D: "]",
+                 0x5E: "⊥", 0x5F: "_", 0x7B: "{", 0x7C: "|", 0x7D: "}", 0x7E: "∼", 0xA0: " "], uniquingKeysWith: { $1 })
+        d.merge(range(0x41, "ΑΒΧΔΕΦΓΗΙϑΚΛΜΝΟΠΘΡΣΤΥςΩΞΨΖ"), uniquingKeysWith: { $1 })
+        d.merge(range(0x61, "αβχδεφγηιϕκλμνοπθρστυϖωξψζ"), uniquingKeysWith: { $1 })
+        d.merge(range(0xA1, "ϒ′≤⁄∞ƒ♣♦♥♠↔←↑→↓°±″≥×∝∂•÷≠≡≈…⏐⎯↵ℵℑℜ℘⊗⊕∅∩∪⊃⊇⊄⊂⊆∈∉∠∇®©™∏√⋅¬∧∨⇔⇐⇑⇒⇓◊〈®©™∑"), uniquingKeysWith: { $1 })
+        d.merge([0xF1: "〉", 0xF2: "∫"], uniquingKeysWith: { $1 })
+        return d
+    }()
+}
+
+// MARK: - Equations
+
+/// OMML (m:oMath) as linear text: fractions "a/b" with parentheses where an operand is not a single term, "x^2",
+/// "x_i", "√(x+1)", "∑_(i=1)^n x_i", delimiters as written, matrices row by row "[a, b; c, d]", equation arrays one
+/// row per line. Every m:t is kept, so no text of an equation is lost even where the layout is.
+enum DocxMath {
+    static func linear(_ n: XNode) -> String {
+        switch n.tag {
+        case "m:t", "w:t": return n.text
+        case "m:oMathPara":
+            return n.children.filter { $0.tag == "m:oMath" }.map(linear).joined(separator: "\n")
+        case "m:f":
+            let num = part(n, "m:num"), den = part(n, "m:den")
+            return wrap(num) + "/" + wrap(den)
+        case "m:sSup": return wrap(part(n, "m:e")) + "^" + wrap(part(n, "m:sup"))
+        case "m:sSub": return wrap(part(n, "m:e")) + "_" + wrap(part(n, "m:sub"))
+        case "m:sSubSup": return wrap(part(n, "m:e")) + "_" + wrap(part(n, "m:sub")) + "^" + wrap(part(n, "m:sup"))
+        case "m:sPre": return "_" + wrap(part(n, "m:sub")) + "^" + wrap(part(n, "m:sup")) + wrap(part(n, "m:e"))
+        case "m:rad":
+            let deg = part(n, "m:deg"), e = wrap(part(n, "m:e"))
+            switch deg {
+            case "": return "√" + e
+            case "3": return "∛" + e
+            case "4": return "∜" + e
+            default: return wrap(deg) + "√" + e
+            }
+        case "m:nary":
+            let pr = n.child("m:naryPr")
+            let chr = pr?.child("m:chr")?["m:val"] ?? "∫"
+            let sub = part(n, "m:sub"), sup = part(n, "m:sup")
+            var s = chr.isEmpty ? "∫" : chr
+            if !sub.isEmpty { s += "_" + wrap(sub) }
+            if !sup.isEmpty { s += "^" + wrap(sup) }
+            let e = part(n, "m:e")
+            return e.isEmpty ? s : s + " " + e
+        case "m:d":
+            let pr = n.child("m:dPr")
+            let beg = pr?.child("m:begChr").map { $0["m:val"] ?? "" } ?? "("
+            let end = pr?.child("m:endChr").map { $0["m:val"] ?? "" } ?? ")"
+            let sep = pr?.child("m:sepChr").map { $0["m:val"] ?? "" } ?? "|"
+            let es = n.children.filter { $0.tag == "m:e" }
+            // A matrix inside brackets takes the brackets as its own.
+            if es.count == 1, let only = es.first, only.children.count == 1, let m = only.children.first, m.tag == "m:m" {
+                return beg + rows(m) + end
+            }
+            return beg + es.map(linear).joined(separator: sep) + end
+        case "m:m": return "[" + rows(n) + "]"
+        case "m:eqArr": return n.children.filter { $0.tag == "m:e" }.map(linear).joined(separator: "\n")
+        case "m:func":
+            let name = part(n, "m:fName"), e = part(n, "m:e")
+            return name + (e.hasPrefix("(") || e.hasPrefix("[") || e.isEmpty ? "" : " ") + e
+        case "m:limLow": return part(n, "m:e") + "_" + wrap(part(n, "m:lim"))
+        case "m:limUpp": return part(n, "m:e") + "^" + wrap(part(n, "m:lim"))
+        case "m:acc":
+            let chr = n.child("m:accPr")?.child("m:chr")?["m:val"] ?? "\u{0302}"
+            let e = part(n, "m:e")
+            // A combining accent goes after a single character; anything else is written after the term.
+            return e.count == 1 && chr.unicodeScalars.allSatisfy({ $0.properties.generalCategory == .nonspacingMark }) ? e + chr : wrap(e) + chr
+        case "m:bar":
+            let e = part(n, "m:e")
+            return e.count == 1 ? e + "\u{0305}" : e
+        case "m:phant":
+            let show = n.child("m:phantPr")?.child("m:show")?["m:val"]
+            return show == "0" || show == "off" ? "" : part(n, "m:e")
+        default:
+            // Property elements carry no text; everything else (m:r, m:e, m:box, m:groupChr, m:oMath, …) is its parts.
+            if n.tag.hasSuffix("Pr") { return "" }
+            return n.children.map(linear).joined()
+        }
+    }
+
+    private static func part(_ n: XNode, _ tag: String) -> String {
+        n.child(tag).map(linear) ?? ""
+    }
+
+    private static func rows(_ m: XNode) -> String {
+        m.children.filter { $0.tag == "m:mr" }.map { $0.children.filter { $0.tag == "m:e" }.map(linear).joined(separator: ", ") }
+            .joined(separator: "; ")
+    }
+
+    /// Parentheses unless the operand is one term: a single character, a number, a word, or already bracketed.
+    static func wrap(_ s: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { return "" }
+        if t.count == 1 { return t }
+        if t.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." }) { return t }
+        if let f = t.first, let l = t.last, ["(": ")", "[": "]", "{": "}", "|": "|"][f] == l, balanced(t) { return t }
+        return "(" + t + ")"
+    }
+
+    /// True when the first bracket closes only at the end ("(a)+(b)" is not one bracketed term).
+    private static func balanced(_ t: String) -> Bool {
+        var depth = 0
+        for (i, c) in t.enumerated() {
+            if "([{".contains(c) { depth += 1 } else if ")]}".contains(c) { depth -= 1 }
+            if depth == 0 && i < t.count - 1 { return t.first == "|" }
+        }
+        return depth == 0 || t.first == "|"
+    }
 }

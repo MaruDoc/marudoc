@@ -31,7 +31,9 @@ public enum HTMLWriter {
                     body.append(li.ordered ? "<ol\(start)>" : "<ul>")
                     openLists.append((li.ordered, li.level))
                 }
-                body.append("<li>\(inline(li.paragraph.runs))</li>")
+                // The source's own marker ("(1)", "①", "第１条") as the item's marker string.
+                let marker = li.marker.map { " style=\"list-style-type:\(escape(cssString($0 + " ")))\"" } ?? ""
+                body.append("<li\(marker)>\(inline(li.paragraph.runs))</li>")
             case .quote(let p):
                 body.append("<blockquote><p>\(inline(p.runs))</p></blockquote>")
             case .code(let s, let lang):
@@ -39,10 +41,14 @@ public enum HTMLWriter {
                 body.append("<pre><code\(cls)>\(escape(s))</code></pre>")
             case .table(let t):
                 var rows: [String] = []
+                let spans = t.verticalSpans()
                 for (i, row) in t.rows.enumerated() {
                     let tag = i < t.headerRows ? "th" : "td"
-                    let cells = row.map { c -> String in
-                        let span = c.colSpan > 1 ? " colspan=\"\(c.colSpan)\"" : ""
+                    // Cells covered by a row span above are not written (the browser places the rest correctly).
+                    let cells = row.enumerated().filter { !spans.covered[i][$0.offset] }.map { (j, c) -> String in
+                        var span = c.colSpan > 1 ? " colspan=\"\(c.colSpan)\"" : ""
+                        if spans.rowSpan[i][j] > 1 { span += " rowspan=\"\(spans.rowSpan[i][j])\"" }
+                        if let p = c.paragraphs.first { span += align(p) }
                         return "<\(tag)\(span)>" + c.paragraphs.map { inline($0.runs) }.joined(separator: "<br>") + "</\(tag)>"
                     }.joined()
                     rows.append("<tr>\(cells)</tr>")
@@ -63,6 +69,17 @@ public enum HTMLWriter {
             }
         }
         closeLists(to: 0)
+        // Notes after the text, footnotes and endnotes each in their own section; marks and notes link to each other.
+        for kind in [DocNote.Kind.footnote, .endnote] {
+            let notes = model.notes.filter { $0.kind == kind }
+            if notes.isEmpty { continue }
+            body.append("<section class=\"\(kind == .footnote ? "footnotes" : "endnotes")\"><hr>")
+            for n in notes {
+                let text = n.paragraphs.map { inline($0.runs) }.joined(separator: "<br>")
+                body.append("<p id=\"fn-\(n.id)\"><a href=\"#fnref-\(n.id)\"><sup>\(escape(n.label))</sup></a> \(text)</p>")
+            }
+            body.append("</section>")
+        }
 
         let title = escape(model.title ?? "")
         let lang = Locale.preferredLanguages.first?.hasPrefix("ja") == true ? "ja" : "en"
@@ -86,6 +103,7 @@ public enum HTMLWriter {
         blockquote { margin: 1em 0; padding-left: 1em; border-left: 3px solid #c8c8cc; color: #6e6e73; }
         figure { margin: 1.4em 0; } img { max-width: 100%; height: auto; }
         .page-break { break-after: page; height: 0; }
+        .footnotes, .endnotes { font-size: .9em; } .footnotes hr, .endnotes hr { width: 30%; margin: 2em 0 1em; }
         hr { border: 0; border-top: 1px solid #c8c8cc; margin: 2em 0; }
         </style>
         </head>
@@ -125,9 +143,28 @@ public enum HTMLWriter {
     /// (the link text stays). Whitespace and control characters are removed first, as browsers ignore them inside a scheme.
     static func safeHref(_ raw: String) -> String? { LinkPolicy.safeHref(raw) }
 
+    /// A CSS string literal ('…') for `s`.
+    static func cssString(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\A ") + "'"
+    }
+
     static func inline(_ runs: [DocRun]) -> String {
         DocParagraph(runs).normalized().runs.map { run in
+            if let img = run.image {
+                let w = SafeInt.round(img.displayWidth, 0, 100_000)
+                return "<img src=\"data:\(img.format.mimeType);base64,\(img.data.base64EncodedString())\" width=\"\(w)\" alt=\"\(escape(run.text))\">"
+            }
+            if let id = run.noteID {
+                return "<sup id=\"fnref-\(id)\"><a href=\"#fn-\(id)\">\(escape(run.text))</a></sup>"
+            }
             var t = escape(run.text).replacingOccurrences(of: "\n", with: "<br>")
+            if let r = run.ruby, !r.isEmpty { t = "<ruby>\(t)<rp>（</rp><rt>\(escape(r))</rt><rp>）</rp></ruby>" }
+            switch run.baseline {
+            case .normal: break
+            case .superscript: t = "<sup>\(t)</sup>"
+            case .subscript: t = "<sub>\(t)</sub>"
+            }
             if run.code { t = "<code>\(t)</code>" }
             if run.bold { t = "<strong>\(t)</strong>" }
             if run.italic { t = "<em>\(t)</em>" }

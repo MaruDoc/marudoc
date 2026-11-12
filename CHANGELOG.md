@@ -2,6 +2,21 @@
 
 The newest version comes first. scripts/site_release.py reads this file to build marudoc.app/update/ and the version line on the site, and scripts/ship.sh uses the newest entry as the GitHub release notes. Keep the format: `## <version> (<yyyy-mm-dd>)`, then one line per change starting with `- `.
 
+## 1.0.7 (2026-11-12)
+
+- Footnotes and endnotes in Word documents are now kept in every conversion. PDFs put footnotes at the bottom of the page, and Word output has real footnotes.
+- Text with ruby (furigana) no longer loses its base characters. HTML and Word keep the ruby; other formats show the reading in parentheses.
+- Superscript and subscript are kept, for example 10⁵ and H₂O, from Word and HTML.
+- Equations in Word documents are written as one-line text instead of disappearing, and symbol characters such as check marks are converted to the matching characters.
+- List markers such as (1), ①, I., a) and 第1条 are kept instead of becoming 1. 2. 3.
+- Pictures inside table cells stay in their cells, merged cells stay merged, and an HTML table with merged rows no longer shifts the next row.
+- Every page break in a Word document starts a new page in the PDF, and documents set in MS Mincho or Century print in a Mincho typeface.
+- Markdown handles line breaks in table cells, inline HTML, HTML blocks, task lists, footnotes and column alignment, and no longer prints front matter as text.
+- An HTML page with an embedded frame no longer loses the text after it.
+- Text files in EUC-JP, UTF-16 without a byte-order mark and ISO-2022-JP are recognised, also in the built-in text editor.
+- Links in PDFs are blue and underlined, and quotes stay readable when the Mac is in Dark Mode.
+- An Excel file with nothing visible to convert now says so instead of writing an empty file.
+
 ## 1.0.6 (2026-11-12)
 
 - Remove Location & Metadata now removes GPS, camera data, dates and embedded thumbnails from JPEG, PNG, HEIC, AVIF, TIFF and GIF files, checks the result, and refuses formats it cannot clean. In 1.0.5 some data could remain, for example the location in PNG files.

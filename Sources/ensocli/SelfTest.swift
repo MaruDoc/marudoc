@@ -199,6 +199,7 @@ final class SelfTest {
         await testAuditImage()
         await testAuditSheet()
         await testAuditPptx()
+        await testAuditWord()
         let d = fresh("fixtures")
         guard let fx = try? makeFixtures(d) else { check("fixtures", false); return 1 }
         await testDocuments(fx.md, fx.pdf)

@@ -396,6 +396,7 @@ private final class PptxParser {
                     paras = paragraphsOf(body).map { DocParagraph($0.runs, alignment: $0.alignment).normalized() }.filter { !$0.isEmpty }
                 }
                 cells.append(DocTableCell(paras, colSpan: min(span, 1000)))
+                cells[cells.count - 1].rowSpan = min(max(OOXMLValue.int(tc["rowSpan"]) ?? 1, 1), 10_000)
             }
             if !cells.isEmpty { rows.append(cells) }
         }

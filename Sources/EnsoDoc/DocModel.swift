@@ -26,6 +26,9 @@ public struct DocColor: Hashable, Sendable {
     public static let black = DocColor(r: 0, g: 0, b: 0)
 }
 
+/// Vertical position of a run: superscript and subscript carry meaning ("10⁵", "H₂O"), so they are content.
+public enum DocBaseline: String, Hashable, Sendable { case normal, superscript, `subscript` }
+
 /// A stretch of text with uniform formatting.
 public struct DocRun: Hashable, Sendable {
     public var text: String
@@ -43,21 +46,65 @@ public struct DocRun: Hashable, Sendable {
     public var highlight: DocColor?
     /// Hyperlink target (absolute URL string).
     public var link: String?
+    public var baseline: DocBaseline
+    /// Ruby (furigana) reading of `text`, which is the base text. Writers with real ruby (HTML, Word) show it above
+    /// the base; every other target writes the reading after the base in full-width parentheses: 漢字（かんじ）.
+    public var ruby: String?
+    /// Set on a note reference mark: the `DocNote.id` it points to. `text` is the visible mark ("1", "i").
+    public var noteID: Int?
+    /// An inline picture (used inside table cells). `text` is its alt text, which targets without pictures print.
+    public var image: DocImage?
 
     public init(_ text: String, bold: Bool = false, italic: Bool = false, underline: Bool = false,
                 strikethrough: Bool = false, code: Bool = false, fontSize: Double? = nil,
-                fontName: String? = nil, color: DocColor? = nil, highlight: DocColor? = nil, link: String? = nil) {
+                fontName: String? = nil, color: DocColor? = nil, highlight: DocColor? = nil, link: String? = nil,
+                baseline: DocBaseline = .normal, ruby: String? = nil, noteID: Int? = nil, image: DocImage? = nil) {
         self.text = text; self.bold = bold; self.italic = italic; self.underline = underline
         self.strikethrough = strikethrough; self.code = code; self.fontSize = fontSize
         self.fontName = fontName; self.color = color; self.highlight = highlight; self.link = link
+        self.baseline = baseline; self.ruby = ruby; self.noteID = noteID; self.image = image
     }
 
-    /// True when two runs could be merged without losing formatting.
+    /// True when two runs could be merged without losing formatting. Ruby groups, note marks and pictures are units of
+    /// their own and never merge.
     public func sameStyle(as o: DocRun) -> Bool {
         bold == o.bold && italic == o.italic && underline == o.underline && strikethrough == o.strikethrough &&
         code == o.code && fontSize == o.fontSize && fontName == o.fontName && color == o.color &&
-        highlight == o.highlight && link == o.link
+        highlight == o.highlight && link == o.link && baseline == o.baseline &&
+        ruby == nil && o.ruby == nil && noteID == nil && o.noteID == nil && image == nil && o.image == nil
     }
+
+    /// The run as plain text, for targets without formatting (text files, copy text, Markdown where noted):
+    ///   - ruby: base followed by the reading in full-width parentheses, 漢字（かんじ）;
+    ///   - superscript / subscript: Unicode super/subscript characters when every character has one ("10⁵", "H₂O"),
+    ///     otherwise "^(…)" / "_(…)" so the meaning never silently changes ("x^(n+1)");
+    ///   - note marks: "[1]", matching the "[1] …" notes list at the end;
+    ///   - pictures: their alt text.
+    public var plainForm: String {
+        if noteID != nil { return "[\(text)]" }
+        var t = text
+        switch baseline {
+        case .normal: break
+        case .superscript: t = DocRun.scripted(t, DocRun.superscripts, caret: "^")
+        case .subscript: t = DocRun.scripted(t, DocRun.subscripts, caret: "_")
+        }
+        if let r = ruby, !r.isEmpty { t += "（\(r)）" }
+        return t
+    }
+
+    static func scripted(_ s: String, _ table: [Character: Character], caret: String) -> String {
+        if !s.isEmpty, s.allSatisfy({ table[$0] != nil }) { return String(s.map { table[$0]! }) }
+        return s.isEmpty ? s : "\(caret)(\(s))"
+    }
+
+    static let superscripts: [Character: Character] = [
+        "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+        "+": "⁺", "-": "⁻", "−": "⁻", "=": "⁼", "(": "⁽", ")": "⁾", "n": "ⁿ", "i": "ⁱ",
+    ]
+    static let subscripts: [Character: Character] = [
+        "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+        "+": "₊", "-": "₋", "−": "₋", "=": "₌", "(": "₍", ")": "₎",
+    ]
 }
 
 public enum DocAlignment: String, Hashable, Sendable { case left, center, right, justify }
@@ -76,15 +123,30 @@ public struct DocParagraph: Hashable, Sendable {
     }
 
     public var plainText: String { runs.map(\.text).joined() }
-    public var isEmpty: Bool { plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// The text with ruby, super/subscripts and note marks spelled out (see `DocRun.plainForm`).
+    public var plainForm: String { runs.map(\.plainForm).joined() }
+    public var isEmpty: Bool { plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !runs.contains { $0.image != nil } }
 
     /// Merges adjacent runs with identical style.
     public func normalized() -> DocParagraph {
         var out: [DocRun] = []
-        for r in runs where !r.text.isEmpty {
+        for r in runs where !r.text.isEmpty || r.image != nil {
             if let last = out.last, last.sameStyle(as: r) { out[out.count - 1].text += r.text } else { out.append(r) }
         }
         var p = self; p.runs = out; return p
+    }
+}
+
+/// A footnote or endnote. The reference mark in the text is a run with `noteID == id` and `text == label`.
+public struct DocNote: Hashable, Sendable {
+    public enum Kind: String, Hashable, Sendable { case footnote, endnote }
+    public var id: Int
+    public var kind: Kind
+    /// The mark as the source numbers it: "1", "2" for footnotes, "i", "ii" for endnotes (Word's defaults).
+    public var label: String
+    public var paragraphs: [DocParagraph]
+    public init(id: Int, kind: Kind, label: String, paragraphs: [DocParagraph]) {
+        self.id = id; self.kind = kind; self.label = label; self.paragraphs = paragraphs
     }
 }
 
@@ -113,6 +175,16 @@ public struct DocImage: Hashable, Sendable {
     }
 }
 
+/// How a numbered list level counts, in OOXML's vocabulary because it is the richest one: `format` is an
+/// ST_NumberFormat name ("decimal", "decimalEnclosedCircle", "upperRoman", "iroha", …) and `pattern` the level text
+/// with %1…%9 standing for the counters of levels 1…9 ("(%1)", "第%1条", "%1.%2"). Only the Word writer uses it;
+/// every other writer prints `DocListItem.marker`.
+public struct DocListNumbering: Hashable, Sendable {
+    public var format: String
+    public var pattern: String
+    public init(format: String, pattern: String) { self.format = format; self.pattern = pattern }
+}
+
 public struct DocListItem: Hashable, Sendable {
     public var ordered: Bool
     /// Nesting depth, 0 = top level.
@@ -120,17 +192,35 @@ public struct DocListItem: Hashable, Sendable {
     /// Explicit number for ordered lists when known.
     public var number: Int?
     public var paragraph: DocParagraph
-    public init(ordered: Bool, level: Int = 0, number: Int? = nil, paragraph: DocParagraph) {
+    /// The marker exactly as the source shows it ("(1)", "①", "Ⅱ.", "a)", "イ.", "第１条", "1.1", "➢").
+    /// nil = the writer's default ("1." with `number`, or its own bullet).
+    public var marker: String?
+    public var numbering: DocListNumbering?
+    public init(ordered: Bool, level: Int = 0, number: Int? = nil, paragraph: DocParagraph,
+                marker: String? = nil, numbering: DocListNumbering? = nil) {
         self.ordered = ordered; self.level = level; self.number = number; self.paragraph = paragraph
+        self.marker = marker; self.numbering = numbering
+    }
+
+    /// The marker text: the source's, else "1." for numbered items and `bullet` for the others.
+    public func markerText(bullet: String) -> String {
+        if let m = marker, !m.isEmpty { return m }
+        return ordered ? "\(number ?? 1)." : bullet
     }
 }
 
 public struct DocTableCell: Hashable, Sendable {
     public var paragraphs: [DocParagraph]
     public var colSpan: Int
-    public init(_ paragraphs: [DocParagraph], colSpan: Int = 1) { self.paragraphs = paragraphs; self.colSpan = colSpan }
+    /// Rows this cell covers (vertical merge). The cells it covers in the rows below stay in `rows` as empty
+    /// placeholders, so writers that cannot merge vertically show them as empty cells.
+    public var rowSpan: Int
+    public init(_ paragraphs: [DocParagraph], colSpan: Int = 1, rowSpan: Int = 1) {
+        self.paragraphs = paragraphs; self.colSpan = colSpan; self.rowSpan = rowSpan
+    }
     public init(text: String) { self.init([DocParagraph(text: text)]) }
     public var text: String { paragraphs.map(\.plainText).joined(separator: "\n") }
+    var isBlank: Bool { paragraphs.allSatisfy(\.isEmpty) }
 }
 
 public struct DocTable: Hashable, Sendable {
@@ -143,6 +233,33 @@ public struct DocTable: Hashable, Sendable {
         self.rows = rows; self.headerRows = headerRows; self.columnWidths = columnWidths
     }
     public var columnCount: Int { rows.map { $0.reduce(0) { $0 + $1.colSpan } }.max() ?? 0 }
+
+    /// Vertical merges as writers that merge cells should draw them. `rowSpan[r][i]` is the span of cell i of row r,
+    /// clamped so that it only covers empty placeholder cells starting in the same column (a cell with content is
+    /// never hidden) and never runs past the table; `covered[r][i]` marks the placeholders such a span covers, which
+    /// those writers skip.
+    public func verticalSpans() -> (rowSpan: [[Int]], covered: [[Bool]]) {
+        var spans = rows.map { $0.map { _ in 1 } }
+        var covered = rows.map { $0.map { _ in false } }
+        let starts: [[Int]] = rows.map { row in
+            var col = 0
+            return row.map { c in defer { col += max(c.colSpan, 1) }; return col }
+        }
+        for r in rows.indices {
+            for i in rows[r].indices where rows[r][i].rowSpan > 1 && !covered[r][i] {
+                let col = starts[r][i]
+                var span = 1
+                while span < rows[r][i].rowSpan, r + span < rows.count,
+                      let j = starts[r + span].firstIndex(of: col), !covered[r + span][j], rows[r + span][j].isBlank,
+                      rows[r + span][j].rowSpan <= 1 {
+                    covered[r + span][j] = true
+                    span += 1
+                }
+                spans[r][i] = span
+            }
+        }
+        return (spans, covered)
+    }
 }
 
 public enum DocBlock: Hashable, Sendable {
@@ -166,33 +283,45 @@ public struct DocModel: Sendable {
     public var bodyFontSize: Double
     /// Font family the source used for body text, if known.
     public var bodyFontName: String?
+    /// Font family the source used for East Asian body text (Word's eastAsia font, "ＭＳ 明朝"), if known.
+    public var bodyEastAsianFontName: String?
+    /// Footnotes and endnotes, in the order their marks appear. Marks are runs with `noteID`.
+    public var notes: [DocNote]
 
     public init(title: String? = nil, blocks: [DocBlock] = [], pageSize: CGSize? = nil,
-                bodyFontSize: Double = 11, bodyFontName: String? = nil) {
+                bodyFontSize: Double = 11, bodyFontName: String? = nil, notes: [DocNote] = [], bodyEastAsianFontName: String? = nil) {
         self.title = title; self.blocks = blocks; self.pageSize = pageSize
-        self.bodyFontSize = bodyFontSize; self.bodyFontName = bodyFontName
+        self.bodyFontSize = bodyFontSize; self.bodyFontName = bodyFontName; self.notes = notes
+        self.bodyEastAsianFontName = bodyEastAsianFontName
     }
 
     public static let a4 = CGSize(width: 595.28, height: 841.89)
 
-    /// All text, one block per line group. Used by "copy text" and plain-text export.
+    /// All text, one block per line group. Used by "copy text" and plain-text export. Ruby, super/subscripts and
+    /// note marks are spelled out (`DocRun.plainForm`); the notes follow the text as "[1] …" lines, footnotes first.
     public var plainText: String {
         var parts: [String] = []
         for b in blocks {
             switch b {
-            case .heading(_, let p), .paragraph(let p), .quote(let p): parts.append(p.plainText)
+            case .heading(_, let p), .paragraph(let p), .quote(let p): parts.append(p.plainForm)
             case .listItem(let li):
                 let indent = String(repeating: "  ", count: li.level)
-                parts.append(indent + (li.ordered ? "\(li.number ?? 1). " : "・") + li.paragraph.plainText)
+                let marker = li.markerText(bullet: "・")
+                parts.append(indent + marker + (marker == "・" ? "" : " ") + li.paragraph.plainForm)
             case .code(let s, _): parts.append(s)
-            case .table(let t): parts.append(t.rows.map { $0.map(\.text).joined(separator: "\t") }.joined(separator: "\n"))
+            case .table(let t): parts.append(t.rows.map { $0.map { $0.paragraphs.map(\.plainForm).joined(separator: "\n") }.joined(separator: "\t") }.joined(separator: "\n"))
             case .image(let img): if let alt = img.altText, !alt.isEmpty { parts.append(alt) }
             case .pageBreak: parts.append("")
             case .horizontalRule: parts.append("")
             }
         }
+        let notes = orderedNotes.map { n in "[\(n.label)] " + n.paragraphs.map(\.plainForm).joined(separator: "\n") }
+        if !notes.isEmpty { parts.append(notes.joined(separator: "\n")) }
         return parts.joined(separator: "\n\n").replacingOccurrences(of: "\n\n\n+", with: "\n\n", options: .regularExpression)
     }
+
+    /// Footnotes, then endnotes, each in mark order: the order every writer lists them in.
+    public var orderedNotes: [DocNote] { notes.filter { $0.kind == .footnote } + notes.filter { $0.kind == .endnote } }
 }
 
 // MARK: - Spreadsheets

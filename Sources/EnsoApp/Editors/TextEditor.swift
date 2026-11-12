@@ -102,12 +102,10 @@ final class TextEditorModel: ObservableObject {
     }
 
     static func decodeKeepingEncoding(_ data: Data) -> (String, String.Encoding, Bool) {
-        if data.starts(with: [0xEF, 0xBB, 0xBF]) { return (String(decoding: data.dropFirst(3), as: UTF8.self), .utf8, true) }
-        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]) { return (String(data: data, encoding: .utf16) ?? "", .utf16, true) }
-        if let s = String(data: data, encoding: .utf8) { return (s, .utf8, false) }
-        if let s = String(data: data, encoding: .shiftJIS) { return (s, .shiftJIS, false) }
-        if let s = String(data: data, encoding: .japaneseEUC) { return (s, .japaneseEUC, false) }
-        return (String(decoding: data, as: UTF8.self), .utf8, false)
+        // The same detection as conversions use (byte-order mark, UTF-16 without one, ISO-2022-JP, then a score
+        // between Shift_JIS and EUC-JP), so a file opens in the editor the way it converts.
+        let r = PlainTextReader.decodeDetectingEncoding(data)
+        return (r.text, r.encoding, r.hadBOM)
     }
 
     func encodedText(_ s: String) -> Data {

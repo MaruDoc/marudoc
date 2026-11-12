@@ -8,7 +8,8 @@ public enum HTMLReader {
         let doc: XMLDocument
         do {
             // Decode ourselves: tidy would otherwise read UTF-8 pages as Latin-1.
-            doc = try XMLDocument(xmlString: stripXMLDeclaration(decode(data)), options: [.documentTidyHTML, .nodeLoadExternalEntitiesNever])
+            doc = try XMLDocument(xmlString: stripSkippedContainers(stripXMLDeclaration(decode(data))),
+                                  options: [.documentTidyHTML, .nodeLoadExternalEntitiesNever])
         } catch {
             // Fall back to text if even tidy can't make sense of it.
             let text = String(decoding: data, as: UTF8.self)
@@ -26,6 +27,21 @@ public enum HTMLReader {
         var model = DocModel(title: (title?.isEmpty == false) ? title : nil, blocks: b.blocks, bodyFontSize: 11)
         if model.title == nil, case .heading(_, let p)? = model.blocks.first { model.title = p.plainText }
         return model
+    }
+
+    /// Removes <iframe> and <button> elements from the source before tidy sees it. Both are skipped anyway, but when
+    /// an inline element is still open before them (`<b>bold <iframe></iframe><p>rest`), tidy moves everything that
+    /// follows inside them, and skipping them then deleted the rest of the document. Only the element itself goes:
+    /// an iframe's fallback text and a button's label were never shown.
+    static func stripSkippedContainers(_ s: String) -> String {
+        guard s.range(of: "<iframe", options: .caseInsensitive) != nil || s.range(of: "<button", options: .caseInsensitive) != nil else { return s }
+        var t = s
+        for tag in ["iframe", "button"] {
+            t = t.replacingOccurrences(of: "(?is)<\(tag)\\b[^>]*>.*?</\(tag)\\s*>", with: " ", options: .regularExpression)
+            // An element never closed: drop its start tag only, keep what follows.
+            t = t.replacingOccurrences(of: "(?is)<\(tag)\\b[^>]*>", with: " ", options: .regularExpression)
+        }
+        return t
     }
 
     /// An XHTML file may start with `<?xml ... ?>`; tidy mode would choke on it or mis-decode the text.
@@ -50,6 +66,7 @@ public enum HTMLReader {
     struct Style {
         var bold = false, italic = false, underline = false, strike = false, code = false
         var link: String?
+        var baseline = DocBaseline.normal
     }
 
     struct Builder {
@@ -100,7 +117,7 @@ public enum HTMLReader {
                 if collapsed.isEmpty { return }
                 if collapsed == " ", runs.isEmpty || runs.last?.text.hasSuffix(" ") == true { return }
                 runs.append(DocRun(collapsed, bold: style.bold, italic: style.italic, underline: style.underline,
-                                   strikethrough: style.strike, code: style.code, link: style.link))
+                                   strikethrough: style.strike, code: style.code, link: style.link, baseline: style.baseline))
                 return
             }
             guard let el = node as? XMLElement, let name = el.name?.lowercased() else { return }
@@ -114,6 +131,31 @@ public enum HTMLReader {
             case "code", "kbd", "tt", "samp": s.code = true
             case "a":
                 if let href = el.attribute(forName: "href")?.stringValue, href.hasPrefix("http") || href.hasPrefix("mailto:") { s.link = href }
+            case "sup": s.baseline = .superscript
+            case "sub": s.baseline = .subscript
+            case "ruby":
+                // Base text with its reading (<rt>); <rp> parentheses are for browsers without ruby.
+                var base = "", reading = ""
+                func collect(_ n: XMLNode) {
+                    for c in n.children ?? [] {
+                        if let e = c as? XMLElement {
+                            switch e.name?.lowercased() {
+                            case "rt": reading += e.stringValue ?? ""
+                            case "rp": continue
+                            default: collect(e)
+                            }
+                        } else if c.kind == .text { base += c.stringValue ?? "" }
+                    }
+                }
+                collect(el)
+                base = base.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                reading = reading.trimmingCharacters(in: .whitespacesAndNewlines)
+                if base.trimmingCharacters(in: .whitespaces).isEmpty { base = reading; reading = "" }
+                if !base.isEmpty {
+                    runs.append(DocRun(base, bold: s.bold, italic: s.italic, underline: s.underline, strikethrough: s.strike,
+                                       code: s.code, link: s.link, baseline: s.baseline, ruby: reading.isEmpty ? nil : reading))
+                }
+                return
             case "br":
                 runs.append(DocRun("\n")); return
             case "img":
@@ -169,6 +211,9 @@ public enum HTMLReader {
         func table(_ el: XMLElement) -> DocTable? {
             var rows: [[DocTableCell]] = []
             var header = 0
+            // Columns still covered by a rowspan from a row above: start column -> (rows left, its colspan). Covered
+            // positions get empty placeholder cells, so the cells after them land in their own columns.
+            var covered: [Int: (rows: Int, span: Int)] = [:]
             func collect(_ node: XMLNode, inHead: Bool) {
                 for c in node.children ?? [] {
                     guard let e = c as? XMLElement, let n = e.name?.lowercased() else { continue }
@@ -178,18 +223,43 @@ public enum HTMLReader {
                     case "tr":
                         var cells: [DocTableCell] = []
                         var allTH = true
+                        var col = 0
+                        var consumed = Set<Int>()
+                        func placeholder(at start: Int) {
+                            guard let c = covered[start] else { return }
+                            cells.append(DocTableCell([DocParagraph(text: "")], colSpan: c.span))
+                            covered[start] = c.rows > 1 ? (c.rows - 1, c.span) : nil
+                            consumed.insert(start)
+                            col = start + c.span
+                        }
                         for cc in e.children ?? [] {
                             guard let ce = cc as? XMLElement, let cn = ce.name?.lowercased(), cn == "td" || cn == "th" else { continue }
+                            while covered[col] != nil { placeholder(at: col) }
                             if cn == "td" { allTH = false }
                             var sub = Builder(baseURL: baseURL)
                             sub.block(ce); sub.flush()
                             let paras = sub.blocks.compactMap { b -> DocParagraph? in
                                 switch b { case .paragraph(let p), .heading(_, let p), .quote(let p): return p
                                 case .listItem(let li): return li.paragraph
+                                // A picture in a cell stays in the cell, as an inline picture.
+                                case .image(let img): return DocParagraph([DocRun(img.altText ?? "", image: img)])
                                 default: return nil }
                             }
-                            let span = Int(ce.attribute(forName: "colspan")?.stringValue ?? "1") ?? 1
-                            cells.append(DocTableCell(paras.isEmpty ? [DocParagraph(text: "")] : paras, colSpan: max(1, min(span, 60))))
+                            let span = max(1, min(Int(ce.attribute(forName: "colspan")?.stringValue ?? "1") ?? 1, 60))
+                            let rowSpan = max(1, min(Int(ce.attribute(forName: "rowspan")?.stringValue ?? "1") ?? 1, 10_000))
+                            cells.append(DocTableCell(paras.isEmpty ? [DocParagraph(text: "")] : paras, colSpan: span, rowSpan: rowSpan))
+                            if rowSpan > 1 { covered[col] = (rowSpan - 1, span); consumed.insert(col) }
+                            col += span
+                        }
+                        // Covered columns after the row's last cell: pad up to each, then its placeholder.
+                        for start in covered.keys.sorted() where start >= col && !consumed.contains(start) {
+                            while col < start { cells.append(DocTableCell([DocParagraph(text: "")])); col += 1 }
+                            placeholder(at: start)
+                        }
+                        // A span this row's cells overlapped (malformed table) still uses up the row. (Spans that start in
+                        // this row are in `consumed` too.)
+                        for (start, c) in covered where !consumed.contains(start) && start < col {
+                            covered[start] = c.rows > 1 ? (c.rows - 1, c.span) : nil
                         }
                         if !cells.isEmpty {
                             if (inHead || allTH) && rows.count == header { header += 1 }

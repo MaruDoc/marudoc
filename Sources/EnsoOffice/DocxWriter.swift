@@ -13,6 +13,8 @@ public enum DocxWriter {
     public static func data(_ model: DocModel) throws -> Data {
         let b = DocxBuilder(model: model)
         let body = b.body()
+        // After the body: the notes its marks refer to, as real Word footnotes and endnotes.
+        let notes = b.notesParts()
 
         let zip = ZipWriter()
         var defaults: [(String, String)] = []
@@ -26,7 +28,11 @@ public enum DocxWriter {
             ("word/settings.xml", "\(wml).settings+xml"),
             ("docProps/core.xml", OPC.coreContentType),
             ("docProps/app.xml", OPC.appContentType),
-        ]))
+        ] + notes.map { ("word/\($0.name)", "\(wml).\($0.kind == .footnote ? "footnotes" : "endnotes")+xml") }))
+        for n in notes {
+            try zip.add(path: "word/\(n.name)", text: n.xml)
+            if let rels = n.rels { try zip.add(path: "word/_rels/\(n.name).rels", text: rels) }
+        }
         try zip.add(path: "_rels/.rels", text: OPC.packageRels(main: "word/document.xml"))
         try zip.add(path: "docProps/core.xml", text: OPC.coreProperties(title: model.title))
         try zip.add(path: "docProps/app.xml", text: OPC.appProperties())
@@ -62,10 +68,18 @@ private final class DocxBuilder {
     private var drawingId = 0
     private var fontCache: [String: FontNameMapper.Family?] = [:]
 
-    // Numbering: abstractNum 0 / num 1 are the shared bullet list; each ordered list gets its own pair.
-    private var orderedLists: [(abstractId: Int, numId: Int, level: Int, start: Int)] = []
+    // Numbering: abstractNum 0 / num 1 are the shared bullet list; each ordered list gets its own pair, and so does
+    // a list with the source's own format at its level (numFmt + lvlText, or a bullet character).
+    private var orderedLists: [(abstractId: Int, numId: Int, level: Int, start: Int, own: DocListNumbering?)] = []
     private var bulletUsed = false
     static let bulletNumId = 1
+
+    // Notes: model note id -> (kind, w:id) in the order their marks are written.
+    private var noteRefs: [Int: (kind: DocNote.Kind, wid: Int)] = [:]
+    private var noteOrder: [Int] = []
+    private lazy var notesByID: [Int: DocNote] = Dictionary(model.notes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+    /// Width available to a picture in the cell being written (points); nil outside tables.
+    private var cellWidthPt: Double?
 
     init(model: DocModel) {
         self.model = model
@@ -91,7 +105,7 @@ private final class DocxBuilder {
 
     func body() -> String {
         var out = ""
-        var listStack: [(ordered: Bool, numId: Int)?] = []
+        var listStack: [(ordered: Bool, numId: Int, own: DocListNumbering?, next: Int?)?] = []
         var pendingBreak = false
         var previousWasTable = false
 
@@ -122,12 +136,34 @@ private final class DocxBuilder {
                 let lvl = min(max(item.level, 0), 8)
                 if listStack.count > lvl + 1 { listStack.removeLast(listStack.count - lvl - 1) }
                 while listStack.count < lvl + 1 { listStack.append(nil) }
+                // The source's marker: Word numbering of the same format where one level's own counter makes it
+                // ("(%1)", "%1)", "①", "第%1条"), a bullet with the source's character, else the marker as text.
+                var own: DocListNumbering?
+                if let marker = item.marker {
+                    if item.ordered, let n = item.numbering, DocxBuilder.ownLevelOnly(n.pattern, level: lvl),
+                       DocxBuilder.numberFormats.contains(n.format) {
+                        own = n
+                    } else if !item.ordered, !marker.isEmpty, !marker.contains("%") {
+                        own = DocListNumbering(format: "bullet", pattern: marker)
+                    } else {
+                        listStack[lvl] = nil
+                        var p = item.paragraph
+                        p.runs.insert(DocRun(marker + "\t"), at: 0)
+                        let left = 720 * (lvl + 1)
+                        out += paragraph(p, style: "ListParagraph", pageBreakBefore: breakBefore,
+                                         indentXML: "<w:ind w:left=\"\(left)\" w:hanging=\"360\"/>")
+                        break
+                    }
+                }
                 let numId: Int
-                if let cur = listStack[lvl], cur.ordered == item.ordered {
+                // A numbered item whose number is not the next one (a list restarting at 1 or 10) starts a new list.
+                if let cur = listStack[lvl], cur.ordered == item.ordered, cur.own == own,
+                   !item.ordered || item.number == nil || cur.next == nil || item.number == cur.next {
                     numId = cur.numId
+                    listStack[lvl]?.next = item.number.map { $0 + 1 }
                 } else {
-                    numId = item.ordered ? newOrderedList(level: lvl, start: max(item.number ?? 1, 0)) : bulletList()
-                    listStack[lvl] = (item.ordered, numId)
+                    numId = item.ordered || own != nil ? newOrderedList(level: lvl, start: max(item.number ?? 1, 0), own: own) : bulletList()
+                    listStack[lvl] = (item.ordered, numId, own, item.number.map { $0 + 1 })
                 }
                 out += paragraph(item.paragraph, style: "ListParagraph", pageBreakBefore: breakBefore, numPr: (numId, lvl))
             case .code(let text, _):
@@ -164,13 +200,13 @@ private final class DocxBuilder {
     // MARK: Paragraphs
 
     private func pPr(style: String?, pageBreakBefore: Bool = false, numPr: (Int, Int)? = nil,
-                     spacing: String? = nil, indent: Int? = nil, alignment: DocAlignment = .left) -> String {
+                     spacing: String? = nil, indent: Int? = nil, indentXML: String? = nil, alignment: DocAlignment = .left) -> String {
         var s = ""
         if let style { s += "<w:pStyle w:val=\"\(style)\"/>" }
         if pageBreakBefore { s += "<w:pageBreakBefore/>" }
         if let (numId, lvl) = numPr { s += "<w:numPr><w:ilvl w:val=\"\(lvl)\"/><w:numId w:val=\"\(numId)\"/></w:numPr>" }
         if let spacing { s += spacing }
-        if let indent { s += "<w:ind w:left=\"\(indent)\"/>" }
+        if let indent { s += "<w:ind w:left=\"\(indent)\"/>" } else if let indentXML { s += indentXML }
         switch alignment {
         case .left: break
         case .center: s += "<w:jc w:val=\"center\"/>"
@@ -181,9 +217,9 @@ private final class DocxBuilder {
     }
 
     private func paragraph(_ p: DocParagraph, style: String?, pageBreakBefore: Bool = false, numPr: (Int, Int)? = nil,
-                           spacing: String? = nil, indent: Int? = nil, forceBold: Bool = false) -> String {
+                           spacing: String? = nil, indent: Int? = nil, indentXML: String? = nil, forceBold: Bool = false) -> String {
         "<w:p>" + pPr(style: style, pageBreakBefore: pageBreakBefore, numPr: numPr, spacing: spacing,
-                      indent: indent, alignment: p.alignment) + runs(p, forceBold: forceBold) + "</w:p>"
+                      indent: indent, indentXML: indentXML, alignment: p.alignment) + runs(p, forceBold: forceBold) + "</w:p>"
     }
 
     private func codeBlock(_ text: String, pageBreakBefore: Bool) -> String {
@@ -216,7 +252,28 @@ private final class DocxBuilder {
     }
 
     private func run(_ r: DocRun, forceBold: Bool, isLink: Bool) -> String {
+        if let id = r.noteID, let ref = noteReference(id) { return ref }
+        if let img = r.image {
+            let maxW = cellWidthPt ?? Double(textWidth) / 20
+            return drawingRun(img, maxW: maxW, maxH: Double(textHeight) / 20 * 0.95) ?? (r.text.isEmpty ? "" : run(DocRun(r.text), forceBold: forceBold, isLink: isLink))
+        }
         guard !r.text.isEmpty else { return "" }
+        let rPr = runProperties(r, forceBold: forceBold, isLink: isLink)
+        guard let reading = r.ruby, !reading.isEmpty else {
+            return "<w:r>" + (rPr.isEmpty ? "" : "<w:rPr>\(rPr)</w:rPr>") + runContent(r.text) + "</w:r>"
+        }
+        // Ruby: the reading at half the base size, raised above it (Word's own proportions).
+        let hp = r.fontSize.map { Int((min(max($0, 1), 1638) * 2).rounded()) } ?? bodyHalfPoints
+        let rubyHp = max(hp / 2, 2)
+        var s = "<w:r><w:ruby><w:rubyPr><w:rubyAlign w:val=\"distributeSpace\"/><w:hps w:val=\"\(rubyHp)\"/>"
+        s += "<w:hpsRaise w:val=\"\(max(hp - 3, 1))\"/><w:hpsBaseText w:val=\"\(hp)\"/><w:lid w:val=\"ja-JP\"/></w:rubyPr>"
+        s += "<w:rt><w:r><w:rPr><w:sz w:val=\"\(rubyHp)\"/><w:szCs w:val=\"\(rubyHp)\"/></w:rPr>\(runContent(reading))</w:r></w:rt>"
+        s += "<w:rubyBase><w:r>" + (rPr.isEmpty ? "" : "<w:rPr>\(rPr)</w:rPr>") + runContent(r.text) + "</w:r></w:rubyBase></w:ruby></w:r>"
+        return s
+    }
+
+    /// The content of a run's w:rPr, in schema order.
+    private func runProperties(_ r: DocRun, forceBold: Bool, isLink: Bool) -> String {
         var p = ""
         if isLink { p += "<w:rStyle w:val=\"Hyperlink\"/>" } else if r.code { p += "<w:rStyle w:val=\"VerbatimChar\"/>" }
 
@@ -251,7 +308,80 @@ private final class DocxBuilder {
         }
         if r.underline && !isLink { p += "<w:u w:val=\"single\"/>" }
         if let shading { p += shading }
-        return "<w:r>" + (p.isEmpty ? "" : "<w:rPr>\(p)</w:rPr>") + runContent(r.text) + "</w:r>"
+        switch r.baseline {
+        case .normal: break
+        case .superscript: p += "<w:vertAlign w:val=\"superscript\"/>"
+        case .subscript: p += "<w:vertAlign w:val=\"subscript\"/>"
+        }
+        return p
+    }
+
+    // MARK: Notes
+
+    /// The mark for a note: a real footnote or endnote reference (Word numbers it).
+    private func noteReference(_ id: Int) -> String? {
+        guard let note = notesByID[id] else { return nil }
+        let ref: (kind: DocNote.Kind, wid: Int)
+        if let known = noteRefs[id] { ref = known } else {
+            ref = (note.kind, noteOrder.filter { noteRefs[$0]?.kind == note.kind }.count + 1)
+            noteRefs[id] = ref
+            noteOrder.append(id)
+        }
+        let foot = ref.kind == .footnote
+        return "<w:r><w:rPr><w:rStyle w:val=\"\(foot ? "FootnoteReference" : "EndnoteReference")\"/></w:rPr><w:\(foot ? "footnoteReference" : "endnoteReference") w:id=\"\(ref.wid)\"/></w:r>"
+    }
+
+    var hasNotes: Bool { !noteOrder.isEmpty }
+
+    /// footnotes.xml / endnotes.xml for the notes whose marks were written, each with its own relationships (links
+    /// inside notes). Adds the document's relationships to them. Call after `body()`.
+    func notesParts() -> [(kind: DocNote.Kind, name: String, xml: String, rels: String?)] {
+        var parts: [(DocNote.Kind, String, String, String?)] = []
+        for kind in [DocNote.Kind.footnote, .endnote] {
+            let ids = noteOrder.filter { noteRefs[$0]?.kind == kind }
+            if ids.isEmpty { continue }
+            let foot = kind == .footnote
+            let tag = foot ? "footnote" : "endnote"
+            let name = foot ? "footnotes.xml" : "endnotes.xml"
+            let bodyRels = rels, bodyLinks = linkIds
+            rels = OPC.RelsBuilder(); linkIds = [:]
+            var x = xmlHeader + "<w:\(tag)s xmlns:w=\"\(NS.w)\" xmlns:r=\"\(NS.r)\" xmlns:wp=\"\(NS.wp)\" xmlns:a=\"\(NS.a)\" xmlns:pic=\"\(NS.pic)\">"
+            x += "<w:\(tag) w:type=\"separator\" w:id=\"-1\"><w:p><w:pPr><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/></w:pPr><w:r><w:separator/></w:r></w:p></w:\(tag)>"
+            x += "<w:\(tag) w:type=\"continuationSeparator\" w:id=\"0\"><w:p><w:pPr><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/></w:pPr><w:r><w:continuationSeparator/></w:r></w:p></w:\(tag)>"
+            for id in ids {
+                guard let note = notesByID[id], let wid = noteRefs[id]?.wid else { continue }
+                x += "<w:\(tag) w:id=\"\(wid)\">"
+                let paras = note.paragraphs.isEmpty ? [DocParagraph([])] : note.paragraphs
+                let style = foot ? "FootnoteText" : "EndnoteText"
+                for (i, p) in paras.enumerated() {
+                    var own = ""
+                    if i == 0 {
+                        own = "<w:r><w:rPr><w:rStyle w:val=\"\(foot ? "FootnoteReference" : "EndnoteReference")\"/></w:rPr><w:\(tag)Ref/></w:r><w:r><w:t xml:space=\"preserve\"> </w:t></w:r>"
+                    }
+                    var q = p
+                    q.runs = p.runs.filter { $0.noteID == nil }
+                    x += "<w:p>" + pPr(style: style, alignment: q.alignment) + own + runs(q, forceBold: false) + "</w:p>"
+                }
+                x += "</w:\(tag)>"
+            }
+            x += "</w:\(tag)s>"
+            let partRels = rels.items.isEmpty ? nil : rels.xml
+            rels = bodyRels; linkIds = bodyLinks
+            _ = rels.add(RelType.base + (foot ? "footnotes" : "endnotes"), name)
+            parts.append((kind, name, x, partRels))
+        }
+        return parts
+    }
+
+    /// Word's numbering for the notes, matching the labels the source had (footnotes "1", endnotes "i" by default).
+    private func noteNumberFormat(_ kind: DocNote.Kind) -> String? {
+        guard let first = noteOrder.compactMap({ notesByID[$0] }).first(where: { $0.kind == kind })?.label else { return nil }
+        if first.allSatisfy(\.isNumber) { return "decimal" }
+        if first.allSatisfy({ "ivxlcdm".contains($0) }) { return "lowerRoman" }
+        if first.allSatisfy({ "IVXLCDM".contains($0) }) { return "upperRoman" }
+        if first.allSatisfy({ $0.isLowercase }) { return "lowerLetter" }
+        if first.allSatisfy({ $0.isUppercase }) { return "upperLetter" }
+        return nil
     }
 
     /// Run text with line breaks and tabs as their own elements.
@@ -360,14 +490,18 @@ private final class DocxBuilder {
         s += "<w:tblGrid>" + widths.map { "<w:gridCol w:w=\"\($0)\"/>" }.joined() + "</w:tblGrid>"
 
         let headerRows = min(max(t.headerRows, 0), rows.count)
+        // Vertical merges as w:vMerge: "restart" on the merged cell, continuation on the placeholders it covers.
+        let spans = DocTable(rows: rows, headerRows: t.headerRows).verticalSpans()
         for (ri, row) in rows.enumerated() {
             let isHeader = ri < headerRows
             s += "<w:tr>"
             if isHeader { s += "<w:trPr><w:tblHeader/></w:trPr>" }
             var col = 0
-            for cell in row where col < n {
+            for (ci, cell) in row.enumerated() where col < n {
                 let span = min(max(cell.colSpan, 1), n - col)
-                s += tableCell(cell.paragraphs, width: widths[col..<(col + span)].reduce(0, +), span: span, header: isHeader)
+                let vMerge = spans.covered[ri][ci] ? "continue" : (spans.rowSpan[ri][ci] > 1 ? "restart" : nil)
+                s += tableCell(spans.covered[ri][ci] ? [] : cell.paragraphs, width: widths[col..<(col + span)].reduce(0, +), span: span,
+                               header: isHeader, vMerge: vMerge)
                 col += span
             }
             while col < n {
@@ -379,14 +513,18 @@ private final class DocxBuilder {
         return s + "</w:tbl>"
     }
 
-    private func tableCell(_ paragraphs: [DocParagraph], width: Int, span: Int, header: Bool) -> String {
+    private func tableCell(_ paragraphs: [DocParagraph], width: Int, span: Int, header: Bool, vMerge: String? = nil) -> String {
         var s = "<w:tc><w:tcPr><w:tcW w:w=\"\(width)\" w:type=\"dxa\"/>"
         if span > 1 { s += "<w:gridSpan w:val=\"\(span)\"/>" }
+        if let vMerge { s += vMerge == "restart" ? "<w:vMerge w:val=\"restart\"/>" : "<w:vMerge/>" }
         if header { s += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F2F2F2\"/>" }
         s += "</w:tcPr>"
         let spacing = "<w:spacing w:before=\"40\" w:after=\"40\" w:line=\"240\" w:lineRule=\"auto\"/>"
         let paras = paragraphs.isEmpty ? [DocParagraph([])] : paragraphs
+        // Pictures in the cell fit inside its width less the default cell margins (2 × 108 twips).
+        cellWidthPt = max(Double(width - 216) / 20, 8)
         for p in paras { s += paragraph(p, style: nil, spacing: spacing, forceBold: header) }
+        cellWidthPt = nil
         return s + "</w:tc>"
     }
 
@@ -429,10 +567,16 @@ private final class DocxBuilder {
     // MARK: Images
 
     private func imageParagraph(_ img: DocImage, pageBreakBefore: Bool) -> String {
-        guard let prepared = OfficeImage.prepare(img) else {
+        guard let run = drawingRun(img, maxW: Double(textWidth) / 20, maxH: Double(textHeight) / 20 * 0.95) else {
             let alt = img.altText ?? ""
             return alt.isEmpty ? "" : paragraph(DocParagraph(text: alt), style: nil, pageBreakBefore: pageBreakBefore)
         }
+        return "<w:p>" + pPr(style: nil, pageBreakBefore: pageBreakBefore) + run + "</w:p>"
+    }
+
+    /// A run holding the picture as an inline drawing, scaled down to fit maxW × maxH points; nil if it cannot be stored.
+    private func drawingRun(_ img: DocImage, maxW: Double, maxH: Double) -> String? {
+        guard let prepared = OfficeImage.prepare(img) else { return nil }
         let name = "image\(media.count + 1).\(prepared.format.fileExtension)"
         media.append(DocxMedia(name: name, data: prepared.data, format: prepared.format))
         let rid = rels.add(RelType.image, "media/\(name)")
@@ -442,12 +586,11 @@ private final class DocxBuilder {
         if !(w > 0 && h > 0 && w.isFinite && h.isFinite) {
             w = Double(prepared.width) * 0.75; h = Double(prepared.height) * 0.75
         }
-        let maxW = Double(textWidth) / 20, maxH = Double(textHeight) / 20 * 0.95
         let scale = min(1, maxW / w, maxH / h)
         let cx = max(Int((w * scale * 12700).rounded()), 1), cy = max(Int((h * scale * 12700).rounded()), 1)
         let descr = XMLEsc.attr(img.altText ?? "")
 
-        var s = "<w:p>" + pPr(style: nil, pageBreakBefore: pageBreakBefore) + "<w:r><w:drawing>"
+        var s = "<w:r><w:drawing>"
         s += "<wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"\(cx)\" cy=\"\(cy)\"/>"
         s += "<wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>"
         s += "<wp:docPr id=\"\(drawingId)\" name=\"Picture \(drawingId)\" descr=\"\(descr)\"/>"
@@ -456,7 +599,7 @@ private final class DocxBuilder {
         s += "<pic:nvPicPr><pic:cNvPr id=\"\(drawingId)\" name=\"\(name)\" descr=\"\(descr)\"/><pic:cNvPicPr/></pic:nvPicPr>"
         s += "<pic:blipFill><a:blip r:embed=\"\(rid)\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>"
         s += "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"\(cx)\" cy=\"\(cy)\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>"
-        s += "</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+        s += "</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
         return s
     }
 
@@ -464,23 +607,42 @@ private final class DocxBuilder {
 
     private func bulletList() -> Int { bulletUsed = true; return DocxBuilder.bulletNumId }
 
-    private func newOrderedList(level: Int, start: Int) -> Int {
+    private func newOrderedList(level: Int, start: Int, own: DocListNumbering? = nil) -> Int {
         let abstractId = orderedLists.count + 1
         let numId = orderedLists.count + 2
-        orderedLists.append((abstractId, numId, level, start))
+        orderedLists.append((abstractId, numId, level, start, own))
         return numId
+    }
+
+    /// Number formats written as Word numbering; anything else is written as marker text.
+    static let numberFormats: Set<String> = [
+        "decimal", "decimalZero", "decimalFullWidth", "decimalFullWidth2", "decimalEnclosedCircle", "decimalEnclosedCircleChinese",
+        "decimalEnclosedFullstop", "decimalEnclosedParen", "upperRoman", "lowerRoman", "upperLetter", "lowerLetter",
+        "aiueo", "aiueoFullWidth", "iroha", "irohaFullWidth", "ideographDigital", "japaneseCounting", "japaneseLegal",
+        "japaneseDigitalTenThousand", "chineseCounting", "chineseCountingThousand", "ideographTraditional", "ideographZodiac", "ordinal",
+    ]
+
+    /// True when the level text uses only this level's own counter ("(%1)" at level 0): each list level here is a
+    /// numbering of its own, so "%1.%2" could not refer to the parent's counter.
+    static func ownLevelOnly(_ pattern: String, level: Int) -> Bool {
+        var refs: [Int] = []
+        let chars = Array(pattern)
+        for i in chars.indices where chars[i] == "%" && i + 1 < chars.count {
+            if let d = chars[i + 1].wholeNumberValue { refs.append(d) }
+        }
+        return refs == [level + 1] && !pattern.contains("\n")
     }
 
     func numberingXML() -> String {
         var s = xmlHeader + "<w:numbering xmlns:w=\"\(NS.w)\">"
         s += abstractNum(id: 0, ordered: false, startLevel: 0, start: 1)
-        for l in orderedLists { s += abstractNum(id: l.abstractId, ordered: true, startLevel: l.level, start: l.start) }
+        for l in orderedLists { s += abstractNum(id: l.abstractId, ordered: true, startLevel: l.level, start: l.start, own: l.own) }
         s += "<w:num w:numId=\"\(DocxBuilder.bulletNumId)\"><w:abstractNumId w:val=\"0\"/></w:num>"
         for l in orderedLists { s += "<w:num w:numId=\"\(l.numId)\"><w:abstractNumId w:val=\"\(l.abstractId)\"/></w:num>" }
         return s + "</w:numbering>"
     }
 
-    private func abstractNum(id: Int, ordered: Bool, startLevel: Int, start: Int) -> String {
+    private func abstractNum(id: Int, ordered: Bool, startLevel: Int, start: Int, own: DocListNumbering? = nil) -> String {
         var s = "<w:abstractNum w:abstractNumId=\"\(id)\">"
         s += String(format: "<w:nsid w:val=\"%08X\"/>", 0x2A6C_0000 + id)
         s += "<w:multiLevelType w:val=\"hybridMultilevel\"/>"
@@ -490,7 +652,11 @@ private final class DocxBuilder {
             let left = 720 * (lvl + 1)
             s += "<w:lvl w:ilvl=\"\(lvl)\">"
             s += "<w:start w:val=\"\(lvl == startLevel ? start : 1)\"/>"
-            if ordered {
+            if let own, lvl == startLevel {
+                // The source's format at this level: its numFmt and level text, or its bullet character.
+                s += "<w:numFmt w:val=\"\(XMLEsc.attr(own.format))\"/><w:lvlText w:val=\"\(XMLEsc.attr(own.pattern))\"/><w:lvlJc w:val=\"left\"/>"
+                s += "<w:pPr><w:ind w:left=\"\(left)\" w:hanging=\"\(own.pattern.count > 3 ? 720 : 360)\"/></w:pPr>"
+            } else if ordered {
                 s += "<w:numFmt w:val=\"\(formats[lvl % 3])\"/><w:lvlText w:val=\"%\(lvl + 1).\"/><w:lvlJc w:val=\"left\"/>"
                 s += "<w:pPr><w:ind w:left=\"\(left)\" w:hanging=\"360\"/></w:pPr>"
             } else {
@@ -549,6 +715,15 @@ private final class DocxBuilder {
         s += "<w:style w:type=\"character\" w:styleId=\"Hyperlink\"><w:name w:val=\"Hyperlink\"/><w:basedOn w:val=\"DefaultParagraphFont\"/><w:uiPriority w:val=\"99\"/><w:unhideWhenUsed/>"
         s += "<w:rPr><w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/></w:rPr></w:style>"
 
+        if hasNotes {
+            for (text, ref, name) in [("FootnoteText", "FootnoteReference", "footnote"), ("EndnoteText", "EndnoteReference", "endnote")] {
+                s += "<w:style w:type=\"paragraph\" w:styleId=\"\(text)\"><w:name w:val=\"\(name) text\"/><w:basedOn w:val=\"Normal\"/><w:uiPriority w:val=\"99\"/><w:unhideWhenUsed/>"
+                s += "<w:pPr><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/></w:pPr><w:rPr><w:sz w:val=\"\(hp(0.85))\"/><w:szCs w:val=\"\(hp(0.85))\"/></w:rPr></w:style>"
+                s += "<w:style w:type=\"character\" w:styleId=\"\(ref)\"><w:name w:val=\"\(name) reference\"/><w:basedOn w:val=\"DefaultParagraphFont\"/><w:uiPriority w:val=\"99\"/><w:unhideWhenUsed/>"
+                s += "<w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr></w:style>"
+            }
+        }
+
         s += "<w:style w:type=\"character\" w:styleId=\"VerbatimChar\"><w:name w:val=\"Verbatim Char\"/><w:basedOn w:val=\"DefaultParagraphFont\"/><w:uiPriority w:val=\"39\"/>"
         s += "<w:rPr>\(mono)<w:noProof/><w:sz w:val=\"\(hp(0.9))\"/><w:szCs w:val=\"\(hp(0.9))\"/><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F2F2F2\"/></w:rPr></w:style>"
 
@@ -565,6 +740,12 @@ private final class DocxBuilder {
         var s = xmlHeader + "<w:settings xmlns:w=\"\(NS.w)\">"
         s += "<w:zoom w:percent=\"100\"/><w:defaultTabStop w:val=\"720\"/>"
         s += "<w:characterSpacingControl w:val=\"\(hasJapanese ? "compressPunctuation" : "doNotCompress")\"/>"
+        // Notes: the separators every notes part starts with, and the number format the source's labels used.
+        for kind in [DocNote.Kind.footnote, .endnote] where noteOrder.contains(where: { noteRefs[$0]?.kind == kind }) {
+            let tag = kind == .footnote ? "footnote" : "endnote"
+            s += "<w:\(tag)Pr>" + (noteNumberFormat(kind).map { "<w:numFmt w:val=\"\($0)\"/>" } ?? "")
+            s += "<w:\(tag) w:id=\"-1\"/><w:\(tag) w:id=\"0\"/></w:\(tag)Pr>"
+        }
         s += "<w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat>"
         return s + "</w:settings>"
     }
