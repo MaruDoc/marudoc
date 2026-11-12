@@ -50,12 +50,12 @@ macOS 14 以降、Apple シリコン / Intel。MIT ライセンス。
 
 ### プライバシー
 
-通信するコードがありません。ソースに URLSession、Network、WebKit、ソケット系の API はなく、Apple 標準のフレームワークだけを使い、外部ライブラリは入れていません。文字認識と背景の削除も macOS の機能で Mac の中で行います。利用状況の収集、解析ツール、アカウントはありません。
+変換と編集で通信することはありません。通信するのは、直接配布版のメニューの「アップデートを確認… (ネット接続が必要)」を押した時だけで、marudoc.app/version.json (最新版の番号と変更点) を読むだけです。ファイル名や設定は送りません。App Store 版にはこの項目がなく、サンドボックスにネットワークの権限もありません。Apple 標準のフレームワークだけを使い、外部ライブラリは入れていません。文字認識と背景の削除も macOS の機能で Mac の中で行います。利用状況の収集、解析ツール、アカウントはありません。
 
 自分で確かめる方法:
 
-- ソースを検索する: `grep -rnE "URLSession|NWConnection|CFStream|socket|import (WebKit|Network)" Sources/`
-- 起動中のネットワークの口を見る: `lsof -nP -i -a -p $(pgrep -x MaruDoc)` が空になる
+- ソースを検索する: `grep -rnE "URLSession|NWConnection|CFStream|socket|import (WebKit|Network)" Sources/` の結果は Sources/EnsoApp/UpdateCheck.swift だけ
+- 起動中のネットワークの口を見る: `lsof -nP -i -a -p $(pgrep -x MaruDoc)` は、アップデートを確認している数秒以外は空
 - LuLu や Little Snitch で通信を監視する
 
 詳しくは [docs/08_セキュリティQ&A.md](docs/08_セキュリティQ&A.md) と [SECURITY.md](SECURITY.md)。
@@ -140,12 +140,12 @@ MaruDoc asks for each permission the first time you use the feature that needs i
 
 ### Privacy
 
-There is no code that connects to the network. The source has no URLSession, Network, WebKit or socket APIs, uses only Apple's system frameworks, and has no third-party libraries. OCR and background removal use macOS features on the Mac. There is no analytics, tracking or account.
+Converting and editing never use the network. The only connection is the direct-download build's Check for Updates… (Internet Required) menu item: when you click it, MaruDoc reads marudoc.app/version.json (the latest version number and notes) and sends no file names or settings. The Mac App Store build has no such item and no network permission. MaruDoc uses only Apple's system frameworks and has no third-party libraries. OCR and background removal use macOS features on the Mac. There is no analytics, tracking or account.
 
 To check for yourself:
 
-- Search the source: `grep -rnE "URLSession|NWConnection|CFStream|socket|import (WebKit|Network)" Sources/`
-- Look at the running app's network sockets: `lsof -nP -i -a -p $(pgrep -x MaruDoc)` prints nothing.
+- Search the source: `grep -rnE "URLSession|NWConnection|CFStream|socket|import (WebKit|Network)" Sources/` finds only Sources/EnsoApp/UpdateCheck.swift.
+- Look at the running app's network sockets: `lsof -nP -i -a -p $(pgrep -x MaruDoc)` prints nothing except during the few seconds of an update check.
 - Watch traffic with LuLu or Little Snitch.
 
 More in [docs/08_セキュリティQ&A.md](docs/08_セキュリティQ&A.md) (Japanese) and [SECURITY.md](SECURITY.md).

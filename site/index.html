@@ -1,373 +1,446 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MaruDoc | Mac の中で完結する書類の変換と編集</title>
-<meta name="description" content="PDF・Word・画像の変換と編集を、Finder とデスクトップからそのまま行う Mac アプリ。ファイルを外部に送りません。">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MaruDoc: every file tool, one press away. Free for Mac</title>
+<meta name="description" content="Press and hold any file on your Mac to convert, compress, combine or clean it up. PDF to Word, HEIC to JPEG, OCR, background removal. Free, 100% offline, nothing uploaded.">
 <link rel="canonical" href="https://marudoc.app/">
-<meta property="og:title" content="MaruDoc | Mac の中で完結する書類の変換と編集">
-<meta property="og:description" content="PDF・Word・画像の変換と編集を、Finder とデスクトップからそのまま行う Mac アプリ。ファイルを外部に送りません。">
+<link rel="icon" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="MaruDoc: every file tool, one press away">
+<meta property="og:description" content="Free Mac app. Press and hold a file to convert, compress, combine or clean it up. 100% offline.">
 <meta property="og:url" content="https://marudoc.app/">
-<meta property="og:image" content="https://marudoc.app/img/icon.png">
-<link rel="icon" href="img/favicon.png">
-<link rel="alternate" hreflang="en" href="en/">
-<link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
+<meta property="og:image" content="https://marudoc.app/img/clips/hero.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#04060f">
 <script>
-(function () {
-  var u = navigator.userAgent;
-  if (/iPhone|iPad|iPod|Android/i.test(u) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(u) && !window.matchMedia('(pointer: fine)').matches)) {
-    document.documentElement.classList.add('phone');
-  }
-})();
+  (function () {
+    var ua = navigator.userAgent;
+    var ipad = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+    var phone = /iPhone|iPad|iPod|Android/.test(ua) || ipad;
+    var mac = /Macintosh/.test(ua) && !ipad;
+    document.documentElement.className = phone ? "is-phone" : (mac ? "is-mac" : "is-other");
+  })();
 </script>
 <style>
   :root {
-    --bg: #fbfbfd;
-    --text: #1d1d1f;
-    --sub: #6e6e73;
-    --line: #d2d2d7;
-    --accent: #0066cc;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #161617; --text: #f5f5f7; --sub: #a1a1a6; --line: #3a3a3c; --accent: #2997ff; }
+    --bg: #04060f; --navy: #0d1434; --navy2: #1c2757;
+    --text: #f4f6ff; --sub: #aab3d4; --dim: #7a84a8; --line: rgba(150, 180, 255, 0.14);
+    --accent: #2f7bff; --accent2: #6e9bff; --ok: #30d158;
+    --chrome: linear-gradient(180deg, #ffffff 0%, #ffffff 42%, #c2cbe6 64%, #9eabd2 76%, #eef2ff 100%);
   }
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font: 17px/1.75 -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Helvetica Neue", sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
-  [id] { scroll-margin-top: 72px; }
-  h1, h2, h3, p { margin: 0; }
-  h1, h2, h3, p, figcaption, li { word-break: auto-phrase; }
-  .ph { display: inline-block; }
-  p { margin-bottom: 16px; }
-  a { color: var(--accent); }
-  code { font: 13.5px ui-monospace, Menlo, monospace; background: rgba(127,127,127,.12); padding: 1px 5px; border-radius: 4px; }
+  html { background: var(--bg); }
+  body { margin: 0; color: var(--text); background: var(--bg);
+    font: 17px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  img, video { display: block; max-width: 100%; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+  .narrow { max-width: 760px; }
 
-  .t { max-width: 760px; margin-left: auto; margin-right: auto; padding-left: 20px; padding-right: 20px; }
-  .m { max-width: 1160px; margin-left: auto; margin-right: auto; padding-left: 20px; padding-right: 20px; }
+  /* the stage light from the videos */
+  .stage { position: relative; overflow: hidden;
+    background: radial-gradient(90% 60% at 50% 0%, var(--navy2) 0%, var(--navy) 40%, #060812 75%, var(--bg) 100%); }
+
+  header.top { position: sticky; top: 0; z-index: 20; background: rgba(4, 6, 15, 0.72); backdrop-filter: saturate(160%) blur(14px); -webkit-backdrop-filter: saturate(160%) blur(14px); border-bottom: 1px solid var(--line); }
+  header.top .wrap { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 650; letter-spacing: 0.01em; }
+  .brand:hover { text-decoration: none; }
+  .brand img { width: 28px; height: 28px; }
+  header.top nav { display: flex; align-items: center; gap: 22px; font-size: 14px; }
+  header.top nav a.link { color: var(--sub); }
+  header.top nav a.link:hover { color: var(--text); text-decoration: none; }
+  @media (max-width: 720px) { header.top nav a.link { display: none; } }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; cursor: pointer; font: inherit; font-weight: 650;
+    color: #fff; background: var(--accent); border-radius: 980px; padding: 14px 28px; font-size: 17px; line-height: 1.2;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 8px 30px rgba(47, 123, 255, 0.35); }
+  .btn:hover { text-decoration: none; background: #3d86ff; }
+  .btn.small { padding: 8px 16px; font-size: 14px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+  .btn.ghost { background: transparent; color: var(--text); box-shadow: inset 0 0 0 1px rgba(170, 190, 255, 0.35); }
+  .btn.ghost:hover { background: rgba(170, 190, 255, 0.08); }
+  .btn svg { width: 18px; height: 18px; }
+
+  .chrome { background: var(--chrome); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  /* two-line headings: the chrome gradient repeats per line instead of fading across both */
+  h1.chrome { background-size: 100% 1.04em; background-repeat: repeat-y; }
+  .final h2.chrome { background-size: 100% 1.1em; background-repeat: repeat-y; }
+
+  /* hero */
+  .hero { text-align: center; padding: 76px 0 0; }
+  .eyebrow { display: inline-block; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent2); margin-bottom: 18px; }
+  h1 { font-size: clamp(40px, 7.4vw, 76px); line-height: 1.04; letter-spacing: -0.035em; margin: 0 auto; font-weight: 750; max-width: 900px;
+    filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 40px rgba(90, 130, 255, 0.25)); }
+  .lead { font-size: clamp(18px, 2.2vw, 21px); color: var(--sub); max-width: 640px; margin: 22px auto 0; }
+  .cta { margin-top: 34px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .meta { font-size: 13.5px; color: var(--dim); }
+  .meta b { color: var(--sub); font-weight: 600; }
+  .trust { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; margin-top: 6px; font-size: 13.5px; color: var(--sub); }
+  .trust a { color: inherit; }
+  .trust span::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); margin-right: 8px; vertical-align: 2px; box-shadow: 0 0 8px rgba(48, 209, 88, 0.8); }
+
+  /* phone visitors: MaruDoc runs on a Mac, so the first job is to get the link there */
+  .phone-only { display: none; }
+  .is-phone .phone-only { display: block; }
+  .is-phone .mac-only { display: none; }
+  .phone-card { margin: 0 auto; max-width: 420px; padding: 18px 18px 16px; border-radius: 18px; border: 1px solid var(--line); background: rgba(13, 20, 52, 0.6); text-align: center; }
+  .phone-card .domain { font-size: 28px; font-weight: 720; letter-spacing: -0.02em; margin: 2px 0 6px; background: var(--chrome); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .phone-card p { margin: 0 0 12px; font-size: 15px; color: var(--sub); }
+  .phone-card .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .phone-card .btn { font-size: 15px; padding: 12px 18px; }
+
+  .screen { position: relative; margin: 56px auto 0; max-width: 1040px; }
+  .screen::before { content: ""; position: absolute; left: 6%; right: 6%; top: 10%; bottom: -6%; border-radius: 40px;
+    background: radial-gradient(60% 60% at 50% 50%, rgba(60, 100, 255, 0.35), rgba(0, 0, 0, 0) 70%); filter: blur(30px); }
+  .screen video, .clip video { position: relative; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--line); background: #030409; }
+  .screen video { aspect-ratio: 16 / 10; }
+  .clip video { aspect-ratio: 16 / 10; }
+  .hairline { height: 1px; background: linear-gradient(90deg, rgba(160, 190, 255, 0), rgba(160, 190, 255, 0.35), rgba(160, 190, 255, 0)); margin: 0 auto; max-width: 900px; }
+
+  section { padding: 96px 0 0; }
+  h2 { font-size: clamp(30px, 4.4vw, 46px); line-height: 1.1; letter-spacing: -0.025em; margin: 0 0 14px; font-weight: 720; }
   .center { text-align: center; }
+  .sub { color: var(--sub); font-size: 18px; margin: 0; }
 
-  h1 { font-size: clamp(34px, 5.2vw, 60px); line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
-  h2 { font-size: clamp(28px, 3.6vw, 44px); line-height: 1.35; font-weight: 700; margin-bottom: 20px; text-wrap: balance; }
-  h3 { font-size: 21px; line-height: 1.5; font-weight: 700; margin-bottom: 4px; }
-  .lead { font-size: 19px; color: var(--sub); }
-  .meta { font-size: 14px; color: var(--sub); line-height: 1.7; margin-bottom: 6px; }
-  .eyebrow { font-size: 17px; font-weight: 600; color: var(--sub); margin-bottom: 12px; }
+  /* how it works */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 40px; counter-reset: s; }
+  .step { padding: 22px 22px 20px; border-radius: 16px; border: 1px solid var(--line); background: rgba(13, 20, 52, 0.45); }
+  .step::before { counter-increment: s; content: counter(s); display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-weight: 700; font-size: 14px; margin-bottom: 12px; }
+  .step h3 { margin: 0 0 4px; font-size: 18px; }
+  .step p { margin: 0; color: var(--sub); font-size: 15.5px; }
+  .aside { margin-top: 18px; text-align: center; color: var(--sub); font-size: 15.5px; }
+  @media (max-width: 760px) { .steps { grid-template-columns: 1fr; } }
 
-  section { margin-top: 128px; }
+  /* feature clips */
+  .clips { display: grid; grid-template-columns: repeat(2, 1fr); gap: 40px 28px; margin-top: 44px; }
+  .clip h3 { margin: 16px 0 4px; font-size: 20px; letter-spacing: -0.01em; }
+  .clip p { margin: 0; color: var(--sub); font-size: 15.5px; }
+  .clip .num { color: var(--text); font-weight: 600; }
+  @media (max-width: 760px) { .clips { grid-template-columns: 1fr; } }
 
-  header.top { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
-  header.top .m { display: flex; align-items: center; justify-content: space-between; height: 56px; font-size: 14px; }
-  header.top .name { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; color: var(--text); text-decoration: none; }
-  header.top .name img { width: 28px; height: 28px; }
-  header.top nav { display: flex; align-items: center; gap: 24px; }
-  header.top nav a { color: var(--sub); text-decoration: none; }
-  header.top nav a:hover { color: var(--text); }
-  header.top nav a.pill { color: #fff; background: var(--accent); padding: 6px 16px; border-radius: 980px; font-weight: 600; }
-  header.top nav a.pill:hover { color: #fff; opacity: .9; }
+  /* offline */
+  .offline { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
+  .offline ul { list-style: none; padding: 0; margin: 22px 0 0; }
+  .offline li { padding: 12px 0; border-top: 1px solid var(--line); color: var(--sub); font-size: 15.5px; }
+  .offline li b { color: var(--text); font-weight: 600; display: block; font-size: 16px; }
+  @media (max-width: 860px) { .offline { grid-template-columns: 1fr; } }
 
-  .btn { display: inline-block; background: var(--accent); color: #fff; border: 1px solid var(--accent); text-decoration: none; padding: 14px 30px; border-radius: 980px; font: inherit; font-size: 17px; font-weight: 600; line-height: 1.4; cursor: pointer; text-align: center; }
-  .btn:hover { opacity: .9; }
-  .dl { margin-top: 32px; }
-  .dl .btn { margin-bottom: 14px; }
-  .phone-only { display: none; margin-bottom: 20px; }
-  .phone-only p { margin-bottom: 16px; text-wrap: balance; }
-  html.phone .phone-only { display: block; }
-  html.phone .dl .dlbtn { background: transparent; color: var(--accent); }
+  /* everything it does */
+  .formats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 28px; margin-top: 36px; }
+  .formats div { padding: 16px 0; border-top: 1px solid var(--line); }
+  .formats h3 { margin: 0 0 4px; font-size: 16px; }
+  .formats p { margin: 0; color: var(--sub); font-size: 14.5px; }
+  @media (max-width: 860px) { .formats { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 560px) { .formats { grid-template-columns: 1fr; } }
 
-  .hero { margin-top: 56px; }
-  .hero h1 { margin-bottom: 20px; }
-  .hero .lead { max-width: 680px; margin-left: auto; margin-right: auto; text-wrap: balance; }
-  .hero .phone-only { max-width: 560px; margin-left: auto; margin-right: auto; }
-  .hero-media { margin-top: 48px; }
-  .caption { font-size: 14px; color: var(--sub); text-align: center; margin: 14px auto 0; max-width: 640px; }
+  /* download */
+  .get { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; margin-top: 40px; align-items: start; }
+  .get > *, .cmd, .cmd code { min-width: 0; }  /* long commands scroll inside their box instead of widening the page */
+  .others { padding: 6px 4px; }
+  .others h3 { margin: 0 0 6px; font-size: 16px; color: var(--sub); }
+  .others .lbl { margin: 14px 0 6px; font-size: 13.5px; color: var(--dim); }
+  .others .note { margin: 0; font-size: 14.5px; color: var(--sub); }
+  .opt .fine { font-size: 13px; color: var(--dim); }
+  .opt { padding: 22px; border-radius: 16px; border: 1px solid var(--line); background: rgba(13, 20, 52, 0.45); display: flex; flex-direction: column; gap: 10px; }
+  .opt.main { border-color: rgba(110, 155, 255, 0.5); background: linear-gradient(180deg, rgba(47, 123, 255, 0.16), rgba(13, 20, 52, 0.45)); }
+  .opt h3 { margin: 0; font-size: 18px; }
+  .opt p { margin: 0; color: var(--sub); font-size: 14.5px; }
+  .opt .btn { align-self: flex-start; }
+  .tag { display: inline-block; font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent2); }
+  .cmd { display: flex; align-items: center; gap: 8px; background: #02030a; border: 1px solid var(--line); border-radius: 10px; padding: 9px 9px 9px 12px; }
+  .cmd code { flex: 1; font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace; color: #dfe6ff; overflow-x: auto; white-space: nowrap; }
+  .cmd button { flex: none; font: 600 12.5px -apple-system, sans-serif; color: var(--text); background: rgba(170, 190, 255, 0.12); border: 0; border-radius: 7px; padding: 6px 10px; cursor: pointer; }
+  .setup { margin-top: 28px; padding: 20px 22px; border-radius: 16px; border: 1px solid var(--line); }
+  .setup h3 { margin: 0 0 8px; font-size: 17px; }
+  .setup ol { margin: 0; padding-left: 1.2em; color: var(--sub); font-size: 15px; }
+  .setup li { margin: 4px 0; }
+  .setup li b { color: var(--text); font-weight: 600; }
+  @media (max-width: 860px) { .get { grid-template-columns: 1fr; } }
 
-  video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 14px; background: rgba(127,127,127,.12); }
+  /* faq */
+  .faq { margin-top: 30px; }
+  details { border-top: 1px solid var(--line); padding: 16px 0; }
+  details:last-child { border-bottom: 1px solid var(--line); }
+  summary { cursor: pointer; font-weight: 600; font-size: 17px; list-style: none; position: relative; padding-right: 28px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; position: absolute; right: 4px; top: -2px; font-size: 22px; color: var(--dim); font-weight: 400; }
+  details[open] summary::after { content: "\2212"; }
+  details p { margin: 10px 0 0; color: var(--sub); font-size: 15.5px; }
+  code.in { font: 13.5px ui-monospace, Menlo, monospace; background: rgba(170, 190, 255, 0.1); padding: 1px 5px; border-radius: 5px; color: #dfe6ff; }
 
-  .block { margin-top: 112px; }
-  .block:first-of-type { margin-top: 0; }
-  .block .t > p { margin-bottom: 0; }
-  .block .media { margin-top: 40px; }
-  #how > .eyebrow { margin-bottom: 48px; }
+  /* final */
+  .final { text-align: center; padding: 110px 0 100px; }
+  .final .icon { width: 128px; height: 128px; margin: 0 auto 26px; filter: drop-shadow(0 24px 50px rgba(40, 80, 220, 0.5)); }
+  .final h2 { font-size: clamp(34px, 5vw, 54px); }
+  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 13.5px; color: var(--dim); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 22px; justify-content: space-between; }
+  footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  footer a { color: var(--sub); }
 
-  .grid { display: grid; grid-template-columns: 1fr; gap: 56px 32px; margin-top: 64px; }
-  .grid p { margin-bottom: 14px; }
-  @media (min-width: 820px) { .grid { grid-template-columns: 1fr 1fr; } }
-
-  table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.7; margin: 0 0 16px; }
-  th, td { text-align: left; vertical-align: top; padding: 14px 16px 14px 0; border-bottom: 1px solid var(--line); }
-  th { font-weight: 600; white-space: nowrap; padding-right: 24px; }
-  .formats { margin-top: 96px; }
-  .note { font-size: 14px; color: var(--sub); }
-
-  .statement { margin-bottom: 40px; }
-  .statement h2 { margin-bottom: 0; }
-
-  .cmd { display: flex; align-items: center; gap: 10px; margin: 8px 0 16px; }
-  .cmd pre { flex: 1; min-width: 0; margin: 0; padding: 12px 14px; overflow-x: auto; border-radius: 8px; background: rgba(127,127,127,.12); font: 13.5px/1.6 ui-monospace, Menlo, monospace; }
-  .cmd button { font: inherit; font-size: 14px; color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; flex: none; }
-  h2.small { font-size: clamp(24px, 3vw, 32px); margin-bottom: 16px; }
-  .qa h3 { margin-top: 28px; }
-
-  .closing img { width: 96px; height: 96px; margin-bottom: 24px; }
-
-  footer { margin-top: 128px; padding-bottom: 56px; font-size: 14px; color: var(--sub); }
-
-  @media (max-width: 600px) {
-    section { margin-top: 88px; }
-    footer { margin-top: 88px; }
-    .block { margin-top: 72px; }
-    .hero { margin-top: 36px; }
-    .hero-media { margin-top: 36px; }
-    br.pc { display: none; }
-    .btn { padding: 14px 20px; }
-    .dl .btn { display: block; width: 100%; }
-    header.top nav { gap: 16px; }
-    header.top nav a.hl { display: none; }
-    .grid { margin-top: 48px; }
-    .formats { margin-top: 72px; }
-    th, td { display: block; padding: 0; border: 0; }
-    tr { display: block; padding: 14px 0; border-bottom: 1px solid var(--line); }
-    th { white-space: normal; margin-bottom: 2px; }
-  }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
 </style>
 </head>
 <body>
 
 <header class="top">
-  <div class="m">
-    <a class="name" href="./"><img src="img/icon.png" alt="">MaruDoc</a>
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/img/icon.png" alt="">MaruDoc</a>
     <nav>
-      <a class="hl" href="#how">使い方</a>
-      <a class="hl" href="#features">できること</a>
-      <a class="hl" href="#privacy">プライバシー</a>
-      <a href="en/">English</a>
-      <a class="pill" href="#download">ダウンロード</a>
+      <a class="link" href="#how">How it works</a>
+      <a class="link" href="#features">Features</a>
+      <a class="link" href="#offline">Privacy</a>
+      <a class="link" href="#faq">FAQ</a>
+      <a class="btn small mac-only" href="/MaruDoc.dmg" data-dl>Download</a>
+      <button class="btn small phone-only share" type="button" data-done="Link copied">Send to my Mac</button>
     </nav>
   </div>
 </header>
 
-<section class="hero center" id="download">
-  <div class="m">
-    <p class="eyebrow">Mac 用アプリ ・ 完全無料</p>
-    <h1><span class="ph">PDF や Word の</span><span class="ph">変換と編集を、</span><br class="pc"><span class="ph">Finder から</span><span class="ph">そのまま行えます。</span></h1>
-    <p class="lead">ファイルを右クリックするか、デスクトップで長押しするだけで使えます。処理はすべて Mac の中で行い、ファイルを外部に送ることはありません。</p>
-    <div class="dl">
-      <div class="phone-only">
-        <p>MaruDoc は Mac 用のアプリです。Mac でこのページを開いてダウンロードしてください。</p>
-        <button class="btn share" type="button" data-done="リンクをコピーしました" data-url="https://marudoc.app/">Mac にリンクを送る</button>
-      </div>
-      <a class="btn dlbtn" href="MaruDoc.dmg">Mac 版をダウンロード（無料）</a>
-      <p class="meta">バージョン 1.0.4 ・ macOS 14 以降 ・ Apple シリコン / Intel ・ 約 7 MB</p>
-      <p class="meta">Mac App Store 版は準備中です。ターミナルから入れる方法は<a href="#terminal">こちら</a>です。</p>
-    </div>
-  </div>
-  <div class="m hero-media">
-    <video id="hero-video" src="img/promo.mp4" poster="img/promo-poster.jpg" autoplay muted loop playsinline preload="auto" width="1280" height="720" aria-label="デスクトップのファイルを長押しして、円形メニューから変換する様子"></video>
-    <p class="caption">デスクトップのファイルを長押しして、変換したい形式の方向へ滑らせて離すと、元のファイルの隣に変換したファイルが生成されます。</p>
-  </div>
-</section>
+<main>
+  <div class="stage">
+    <div class="wrap hero">
+      <span class="eyebrow">Free Mac app</span>
+      <h1 class="chrome">Every file tool,<br>one press away.</h1>
+      <p class="lead">Press and hold any file on your Mac to convert, compress, combine or clean it up. It all runs on your Mac, so nothing is ever uploaded.</p>
 
-<section id="how" class="center">
-  <p class="eyebrow">使い方</p>
+      <div class="cta">
+        <div class="mac-only">
+          <a class="btn" href="/MaruDoc.dmg" data-dl>
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.68c-.03-2.6 2.12-3.85 2.22-3.91-1.21-1.77-3.09-2.01-3.76-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.89-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.79 1.3 10.34.86 1.25 1.89 2.65 3.23 2.6 1.3-.05 1.79-.84 3.36-.84 1.57 0 2.01.84 3.38.81 1.4-.02 2.28-1.27 3.13-2.53.99-1.45 1.39-2.86 1.42-2.93-.03-.01-2.72-1.04-2.75-4.12zM13.8 5.04c.71-.86 1.19-2.06 1.06-3.25-1.02.04-2.27.68-3 1.54-.66.76-1.23 1.98-1.08 3.15 1.14.09 2.31-.58 3.02-1.44z"/></svg>
+            Download for Mac. It's free
+          </a>
+        </div>
+        <div class="phone-only phone-card">
+          <div class="domain">marudoc.app</div>
+          <p>MaruDoc runs on a Mac. Open this page on your Mac, or send yourself the link.</p>
+          <div class="row">
+            <button class="btn share" type="button" data-done="Link copied">Send to my Mac</button>
+            <a class="btn ghost" href="mailto:?subject=MaruDoc%20for%20Mac&amp;body=Download%20MaruDoc%20on%20your%20Mac%3A%20https%3A%2F%2Fmarudoc.app%2F">Email me the link</a>
+          </div>
+        </div>
+        <div class="meta"><b>Version 1.0.5</b> · macOS 14 or later · Apple silicon and Intel · 7.8 MB · <a href="/update/">Release notes</a></div>
+        <div class="trust"><span>100% offline</span><span><a href="/privacy/">No personal data collected</a></span><span>Notarized by Apple</span><span>Open source</span></div>
+      </div>
 
-  <div class="block">
-    <div class="t">
-      <h2>長押しで、円形のメニュー</h2>
-      <p>デスクトップのファイルを押したまま少し待つと、カーソルの周りに円形のメニューが出ます。項目の方向へ滑らせて離すと実行されます。中心で離すとキャンセルされます。</p>
-    </div>
-    <div class="m media"><video data-autoplay src="img/demos/01-ring-basics.mp4" poster="img/demos/01-ring-basics.jpg" muted loop playsinline preload="none" width="1280" height="720" aria-label="円形のメニュー"></video></div>
-  </div>
-
-  <div class="block">
-    <div class="t">
-      <h2>右クリックからも使えます</h2>
-      <p>Finder でファイルを右クリックして「MaruDoc」を選ぶと、そのファイルに使える操作だけが並びます。</p>
-    </div>
-    <div class="m media"><video data-autoplay src="img/demos/03-finder-right-click.mp4" poster="img/demos/03-finder-right-click.jpg" muted loop playsinline preload="none" width="1280" height="720" aria-label="Finder の右クリックメニュー"></video></div>
-  </div>
-
-  <div class="block">
-    <div class="t">
-      <h2>編集は、ファイルの隣で</h2>
-      <p>トリミングや書き込みを選ぶと、ファイルの隣に小さな編集画面が開きます。保存すると、元のファイルの隣に新しいファイルが生成されます。元のファイルはそのまま残ります。</p>
-    </div>
-    <div class="m media"><video data-autoplay src="img/demos/04-crop.mp4" poster="img/demos/04-crop.jpg" muted loop playsinline preload="none" width="1280" height="720" aria-label="トリミング"></video></div>
-  </div>
-</section>
-
-<section id="features">
-  <div class="t center">
-    <h2>できること</h2>
-    <p>よく使う操作を動画で紹介します。</p>
-  </div>
-  <div class="m">
-    <div class="grid">
-      <div>
-        <h3>PDF を Word に</h3>
-        <p>変換したファイルは、元のファイルの隣に生成されます。</p>
-        <video data-autoplay src="img/demos/02-pdf-to-word.mp4" poster="img/demos/02-pdf-to-word.jpg" muted loop playsinline preload="none" width="1280" height="720" aria-label="PDF を Word に"></video>
-      </div>
-      <div>
-        <h3>結合</h3>
-        <p>選んだ順にページが並んだ 1 つの PDF が生成されます。</p>
-        <video data-autoplay src="img/demos/05-merge.mp4" poster="img/demos/05-merge.jpg" muted loop playsinline preload="none" width="1280" height="720" aria-label="結合"></video>
-      </div>
-      <div>
-        <h3>分割</h3>
-        <p>「1-2, 3」のように範囲を指定して分割できます。</p>
-        <video data-autoplay src="img/demos/06-split.mp4" poster="img/demos/06-split.jpg" muted loop playsinline preload="none" width="1280" height="720" aria-label="分割"></video>
-      </div>
-      <div>
-        <h3>背景の削除</h3>
-        <p>写真の背景を削除して、切り抜いた PNG ファイルを生成します。</p>
-        <video data-autoplay src="img/demos/07-remove-background.mp4" poster="img/demos/07-remove-background.jpg" muted loop playsinline preload="none" width="1280" height="720" aria-label="背景の削除"></video>
-      </div>
-      <div>
-        <h3>文字認識</h3>
-        <p>スキャンした PDF を、文字を検索できる PDF に変換します。</p>
-        <video data-autoplay src="img/demos/08-ocr.mp4" poster="img/demos/08-ocr.jpg" muted loop playsinline preload="none" width="1280" height="720" aria-label="文字認識"></video>
-      </div>
-      <div>
-        <h3>圧縮</h3>
-        <p>写真の多い PDF のファイルサイズを小さくします。</p>
-        <video data-autoplay src="img/demos/09-compress.mp4" poster="img/demos/09-compress.jpg" muted loop playsinline preload="none" width="1280" height="720" aria-label="圧縮"></video>
-      </div>
-      <div>
-        <h3>書き込み</h3>
-        <p>PDF にハイライトやテキストを書き込めます。</p>
-        <video data-autoplay src="img/demos/10-markup.mp4" poster="img/demos/10-markup.jpg" muted loop playsinline preload="none" width="1280" height="720" aria-label="書き込み"></video>
+      <div class="screen">
+        <video id="hero-video" src="/img/clips/hero.mp4" poster="/img/clips/hero.jpg" autoplay muted loop playsinline preload="auto" aria-label="On a MacBook, a PDF on the desktop is pressed and held. A ring of actions opens, Office then Word is chosen, and a Word file appears next to the PDF."></video>
       </div>
     </div>
+    <div style="height: 80px"></div>
+    <div class="hairline"></div>
   </div>
-  <div class="t formats" id="formats">
-    <table>
-      <tr><th>PDF</th><td>Word、Excel、PowerPoint、画像 (PNG / JPEG / HEIC / TIFF)、Markdown、テキスト、HTML、RTF に変換。編集 (文字の追加と修正、ハイライト、手書き、図形、白塗り、墨消し、付箋、署名)、トリミング、ページの回転・削除・並べ替え、結合、分割、圧縮、文字認識 (スキャンを検索可能に)、パスワード、ページ番号、透かし</td></tr>
-      <tr><th>画像</th><td>PDF、PNG、JPEG、HEIC、TIFF に変換。トリミング、回転、サイズ変更、圧縮、背景の削除、文字の読み取り、位置情報などの削除、明るさの調整、書き込み</td></tr>
-      <tr><th>Word</th><td>PDF、Markdown、テキスト、HTML、RTF、画像に変換。書式を保ったまま編集</td></tr>
-      <tr><th>Markdown・テキスト・HTML</th><td>PDF、Word、相互変換、画像。そのまま編集</td></tr>
-      <tr><th>Excel・CSV</th><td>CSV と Excel の相互変換、PDF、Markdown の表、HTML、Word</td></tr>
-      <tr><th>PowerPoint</th><td>テキストと画像を PDF、Word、Markdown に変換。画像の取り出し</td></tr>
-      <tr><th>複数のファイル</th><td>PDF と画像を選んだ順に 1 つの PDF に結合、PDF の分割 (1 ページずつ・範囲指定・N ページごと)、まとめて変換・圧縮・縮小</td></tr>
-    </table>
-    <p class="note">PDF から Word への変換は、段落・見出し・箇条書き・表・画像を読み取って組み立て直します。段組の複雑なレイアウトや装飾の多いチラシは、元の見た目どおりにならないことがあります。</p>
-  </div>
-</section>
 
-<section id="privacy">
-  <div class="t">
-    <div class="statement center"><h2>全ての処理をオフラインで。</h2></div>
-    <p>MaruDoc にはネットワークに接続する処理がありません。変換、編集、文字認識、背景の削除はすべて macOS に組み込まれた機能を使って Mac の中で行います。利用状況の収集もしていません。</p>
-    <p>Mac App Store 版はサンドボックスの中で動き、ネットワークの権限を持っていません。通信しないことを OS が保証する形です。ダウンロード版の権限は、ターミナルで <code>codesign -d --entitlements - /Applications/MaruDoc.app</code> を実行すると確認できます。</p>
-  </div>
-</section>
-
-<section id="setup">
-  <div class="t">
-    <h2 class="small">はじめに設定すること</h2>
-    <p>初回起動時に案内が出ます。右クリックメニューを使うには、システム設定の「一般 → ログイン項目と機能拡張 → Finder」で MaruDoc をオンにします。長押しのメニューを使うには、「プライバシーとセキュリティ → アクセシビリティ」で MaruDoc をオンにします。アクセシビリティは、押したファイルを特定し、マウスの動きを読むためだけに使います。</p>
-  </div>
-</section>
-
-<section id="terminal">
-  <div class="t">
-    <h2 class="small">ターミナルから入れる</h2>
-    <div class="cmd"><pre>curl -fsSL https://marudoc.app/install.sh | sh</pre><button type="button" data-done="コピーしました">コピー</button></div>
-    <p>上のボタンと同じ公証済みの DMG をダウンロードし、署名を確認してからインストールします。スクリプトは <a href="/install.sh">install.sh</a> で読めます。</p>
-    <p>AI エージェントに頼む場合は「MaruDoc を入れて」と伝えて、このコマンドを実行させてください。権限の許可だけは、システム設定でご自身で行ってください。</p>
-    <p class="note">アンインストール</p>
-    <div class="cmd"><pre>curl -fsSL https://marudoc.app/install.sh | sh -s -- --uninstall</pre><button type="button" data-done="コピーしました">コピー</button></div>
-  </div>
-</section>
-
-<section id="faq">
-  <div class="t qa">
-    <h2 class="small">よくある質問</h2>
-    <h3>普通のクリックやドラッグに影響はありますか</h3>
-    <p>ありません。動かさずに 0.5 秒押し続けたときだけ反応します。時間は設定で変えられ、長押しのメニュー自体を切ることもできます。</p>
-    <h3>スキャンした PDF も変換できますか</h3>
-    <p>できます。文字のないページは日本語と英語の文字認識をしてから変換します。</p>
-    <h3>アンインストールするには</h3>
-    <p>メニューバーの MaruDoc から終了し、アプリケーションフォルダの MaruDoc をゴミ箱に入れてください。</p>
-  </div>
-</section>
-
-<section class="closing center">
-  <div class="t">
-    <img src="img/icon.png" alt="">
-    <h2>MaruDoc を使ってみてください</h2>
-    <div class="dl">
-      <div class="phone-only">
-        <p>MaruDoc は Mac 用のアプリです。Mac でこのページを開いてダウンロードしてください。</p>
-        <button class="btn share" type="button" data-done="リンクをコピーしました" data-url="https://marudoc.app/">Mac にリンクを送る</button>
+  <section id="how">
+    <div class="wrap">
+      <h2 class="center chrome">Press. Slide. Let go.</h2>
+      <p class="sub center">No app window to open, no website to upload to.</p>
+      <div class="steps">
+        <div class="step"><h3>Press and hold a file</h3><p>On the desktop, hold a file for half a second. A ring of actions opens around the pointer.</p></div>
+        <div class="step"><h3>Slide to an action</h3><p>Only the actions that work for that file are shown. Groups such as Office open a second ring.</p></div>
+        <div class="step"><h3>Let go</h3><p>The new file appears next to the original. The original is left exactly as it was.</p></div>
       </div>
-      <a class="btn dlbtn" href="MaruDoc.dmg">Mac 版をダウンロード（無料）</a>
-      <p class="meta">バージョン 1.0.4 ・ macOS 14 以降 ・ Apple シリコン / Intel ・ 約 7 MB</p>
-      <p class="meta">Mac App Store 版は準備中です。ターミナルから入れる方法は<a href="#terminal">こちら</a>です。</p>
+      <p class="aside">Prefer menus? Right-click any file in Finder and choose MaruDoc.</p>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2 class="center chrome">The tools you keep searching for</h2>
+      <p class="sub center">Each clip is the real result of MaruDoc run on the same files.</p>
+      <div class="clips">
+        <div class="clip">
+          <video data-autoplay src="/img/clips/compress.mp4" poster="/img/clips/compress.jpg" muted loop playsinline preload="none" aria-label="A 44.6 MB PDF is compressed to 7.7 MB."></video>
+          <h3>Compress a PDF</h3>
+          <p><span class="num">44.6 MB to 7.7 MB</span> in about a second, small enough for any email.</p>
+        </div>
+        <div class="clip">
+          <video data-autoplay src="/img/clips/combine.mp4" poster="/img/clips/combine.jpg" muted loop playsinline preload="none" aria-label="Four images are clicked in order and combined into one PDF."></video>
+          <h3>Combine files into one PDF</h3>
+          <p>Click the files in the order you want, press and hold, Combine. Pages follow your order.</p>
+        </div>
+        <div class="clip">
+          <video data-autoplay src="/img/clips/background.mp4" poster="/img/clips/background.jpg" muted loop playsinline preload="none" aria-label="The background is removed from a photo of a mug."></video>
+          <h3>Remove a background</h3>
+          <p>A clean transparent PNG in <span class="num">under a second</span>. No sign-up, no upload.</p>
+        </div>
+        <div class="clip">
+          <video data-autoplay src="/img/clips/heic.mp4" poster="/img/clips/heic.jpg" muted loop playsinline preload="none" aria-label="Six HEIC photos are converted to JPEG at once."></video>
+          <h3>HEIC to JPEG</h3>
+          <p>Select your iPhone photos and convert them all at once. <span class="num">Six photos in 0.4 seconds.</span></p>
+        </div>
+        <div class="clip">
+          <video data-autoplay src="/img/clips/ocr.mp4" poster="/img/clips/ocr.jpg" muted loop playsinline preload="none" aria-label="A scanned PDF is made searchable, then a search finds 2 matches."></video>
+          <h3>Make scans searchable</h3>
+          <p>Text recognition turns a scanned PDF into one you can search and copy from.</p>
+        </div>
+        <div class="clip">
+          <video data-autoplay src="/img/clips/word.mp4" poster="/img/clips/word.jpg" muted loop playsinline preload="none" aria-label="A PDF is pressed and held, Office then Word is chosen, and a Word file appears next to it."></video>
+          <h3>PDF to Word, Excel or PowerPoint</h3>
+          <p>Paragraphs, headings, tables and images are rebuilt. Table rows land in real Excel cells.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="offline">
+    <div class="wrap offline">
+      <div>
+        <h2 class="chrome">Works with Wi‑Fi off.</h2>
+        <p class="sub">Converting, editing, text recognition and background removal run on your Mac with frameworks built into macOS. No internet needed.</p>
+        <ul>
+          <li><b>Nothing is uploaded</b>Your files never leave your Mac. Not even the file names.</li>
+          <li><b>Online only when you ask</b>Check for Updates is the one thing that connects, and only when you click it. It reads the latest version number and sends nothing about you or your files.</li>
+          <li><b>No account, no tracking</b>No sign-up, no analytics, no ads.</li>
+          <li><b>Notarized by Apple</b>Signed and checked by Apple, so it opens like any app from a known developer.</li>
+          <li><b>Open source</b>The code is on <a href="https://github.com/MaruDoc/marudoc">GitHub</a> under the MIT license.</li>
+        </ul>
+      </div>
+      <div class="clip">
+        <video data-autoplay src="/img/clips/offline.mp4" poster="/img/clips/offline.jpg" muted loop playsinline preload="none" aria-label="Wi-Fi is turned off from the menu bar."></video>
+      </div>
+    </div>
+  </section>
+
+  <section id="all">
+    <div class="wrap">
+      <h2 class="center chrome">Everything it does</h2>
+      <p class="sub center">One app for the file chores that usually send you to a website.</p>
+      <div class="formats">
+        <div><h3>PDF</h3><p>To Word, Excel, PowerPoint, PNG, JPEG, HEIC, TIFF, Markdown, text, HTML, RTF. Compress, OCR, combine, split, crop, rotate, reorder, password, page numbers, watermark, mark up, sign.</p></div>
+        <div><h3>Images</h3><p>To PDF, PNG, JPEG, HEIC, TIFF. Remove background, crop, rotate, resize, compress, recognize text, remove location data.</p></div>
+        <div><h3>Word</h3><p>To PDF, Markdown, text, HTML, RTF, images. Edit with formatting kept.</p></div>
+        <div><h3>Excel and CSV</h3><p>CSV and Excel both ways, to PDF, Markdown tables, HTML, Word.</p></div>
+        <div><h3>PowerPoint</h3><p>Text and images to PDF, Word and Markdown. Extract the images.</p></div>
+        <div><h3>Several files at once</h3><p>Combine into one PDF in the order you picked, split by page or range, convert, compress or resize in bulk.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="download">
+    <div class="wrap">
+      <h2 class="center chrome">Get MaruDoc</h2>
+      <p class="sub center">Free. macOS 14 or later, Apple silicon and Intel.</p>
+      <div class="get">
+        <div class="opt main">
+          <h3>Download the app</h3>
+          <p>Open the DMG and drag MaruDoc to Applications. Includes press and hold and the right-click menu.</p>
+          <a class="btn mac-only" href="/MaruDoc.dmg" data-dl>Download for Mac</a>
+          <button class="btn phone-only share" type="button" data-done="Link copied">Send to my Mac</button>
+          <p class="fine">Version 1.0.5 · 7.8 MB · Notarized by Apple</p>
+        </div>
+        <div class="others">
+          <h3>Other ways to install</h3>
+          <p class="lbl">Homebrew</p>
+          <div class="cmd"><code>brew install --cask marudoc/tap/marudoc</code><button type="button" data-copy data-done="Copied">Copy</button></div>
+          <p class="lbl">Terminal (checks the signature and notarization first, <a href="/install.sh">read the script</a>)</p>
+          <div class="cmd"><code>curl -fsSL https://marudoc.app/install.sh | sh</code><button type="button" data-copy data-done="Copied">Copy</button></div>
+          <p class="lbl">Mac App Store</p>
+          <p class="note"><a href="https://apps.apple.com/app/id6824283583">Get it on the Mac App Store</a>. It has the right-click menu only. Press and hold needs the download above.</p>
+        </div>
+      </div>
+      <div class="setup">
+        <h3>After you open it</h3>
+        <ol>
+          <li>MaruDoc walks you through two switches on first launch.</li>
+          <li><b>Right-click menu:</b> System Settings, General, Login Items &amp; Extensions, Finder, turn on MaruDoc.</li>
+          <li><b>Press and hold:</b> System Settings, Privacy &amp; Security, Accessibility, turn on MaruDoc. It is used only to find the file you pressed and follow the pointer.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap narrow">
+      <h2 class="center chrome">Questions</h2>
+      <div class="faq">
+        <details><summary>Is it really free?</summary><p>Yes. No trial, no subscription, no in-app purchases, no account.</p></details>
+        <details><summary>Are my files uploaded anywhere?</summary><p>No. Every conversion and edit runs on your Mac and works the same with Wi‑Fi off. The only time MaruDoc goes online is when you choose Check for Updates, which reads the latest version number from marudoc.app. Conversion, text recognition and background removal use frameworks built into macOS. See the <a href="/privacy/">privacy policy</a>.</p></details>
+        <details><summary>Will it get in the way of normal clicks and drags?</summary><p>No. The ring only opens when you press and hold a file for half a second without moving. You can change the delay in settings or turn press and hold off.</p></details>
+        <details><summary>Can it convert scanned PDFs?</summary><p>Yes. Pages without text go through text recognition first, so the result has real, searchable text.</p></details>
+        <details><summary>Is there a Mac App Store version?</summary><p>Yes, <a href="https://apps.apple.com/app/id6824283583">on the Mac App Store</a>. It has the right-click menu only, because press and hold needs permissions that the App Store does not allow. For the full app, use the download above.</p></details>
+        <details><summary>Which Macs does it run on?</summary><p>Any Mac with macOS 14 Sonoma or later, Apple silicon or Intel.</p></details>
+        <details><summary>How do I uninstall it?</summary><p>Quit MaruDoc from the menu bar and move it from Applications to the Trash. Or run <code class="in">curl -fsSL https://marudoc.app/install.sh | sh -s -- --uninstall</code>.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <div class="stage final">
+    <div class="wrap">
+      <img class="icon" src="/img/icon.png" alt="MaruDoc">
+      <h2 class="chrome">Free for Mac.<br>100% offline.</h2>
+      <div class="cta">
+        <a class="btn mac-only" href="/MaruDoc.dmg" data-dl>Download for Mac</a>
+        <div class="phone-only phone-card">
+          <p>On your phone? Send the link to your Mac.</p>
+          <div class="row">
+            <button class="btn share" type="button" data-done="Link copied">Send to my Mac</button>
+            <a class="btn ghost" href="mailto:?subject=MaruDoc%20for%20Mac&amp;body=Download%20MaruDoc%20on%20your%20Mac%3A%20https%3A%2F%2Fmarudoc.app%2F">Email me the link</a>
+          </div>
+        </div>
+        <div class="meta">Version 1.0.5 · macOS 14 or later · Apple silicon and Intel · 7.8 MB</div>
+      </div>
     </div>
   </div>
-</section>
+</main>
 
 <footer>
-  <div class="t">© 2026 Yitao Ding ・ <a href="privacy/">プライバシーポリシー</a></div>
+  <div class="wrap">
+    <span>© 2026 Yitao Ding</span>
+    <nav>
+      <a href="/privacy/">Privacy</a>
+      <a href="https://github.com/MaruDoc/marudoc">GitHub</a>
+      <a href="https://www.instagram.com/marudoc.app/">Instagram</a>
+      <a href="mailto:support@marudoc.app">support@marudoc.app</a>
+    </nav>
+  </div>
 </footer>
 
 <script>
-document.querySelectorAll('.cmd button').forEach(function (b) {
-  b.addEventListener('click', function () {
-    var t = b.parentNode.querySelector('pre').textContent.trim();
-    var done = function () { var o = b.textContent; b.textContent = b.dataset.done; setTimeout(function () { b.textContent = o; }, 1500); };
-    if (navigator.clipboard) { navigator.clipboard.writeText(t).then(done); }
+document.querySelectorAll("[data-copy]").forEach(function (b) {
+  b.addEventListener("click", function () {
+    var t = b.parentNode.querySelector("code").textContent.trim();
+    var o = b.textContent;
+    if (navigator.clipboard) { navigator.clipboard.writeText(t).then(function () { b.textContent = b.dataset.done; setTimeout(function () { b.textContent = o; }, 1500); }); }
   });
 });
 
-document.querySelectorAll('.share').forEach(function (b) {
-  b.addEventListener('click', function () {
-    var url = b.dataset.url;
+document.querySelectorAll(".share").forEach(function (b) {
+  if (!navigator.share) { b.textContent = "Copy link"; }
+  b.addEventListener("click", function () {
+    var url = "https://marudoc.app/";
     var orig = b.textContent;
     var copy = function () {
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(function () {
-          b.textContent = b.dataset.done;
-          setTimeout(function () { b.textContent = orig; }, 2000);
-        }).catch(function () {});
+        navigator.clipboard.writeText(url).then(function () { b.textContent = b.dataset.done; setTimeout(function () { b.textContent = orig; }, 2000); }).catch(function () {});
       }
     };
     if (navigator.share) {
-      navigator.share({ title: 'MaruDoc', url: url }).catch(function (e) { if (!e || e.name !== 'AbortError') { copy(); } });
-    } else {
-      copy();
-    }
+      navigator.share({ title: "MaruDoc for Mac", text: "Download MaruDoc on your Mac", url: url }).catch(function (e) { if (!e || e.name !== "AbortError") { copy(); } });
+    } else { copy(); }
   });
 });
 
 (function () {
-  var hero = document.getElementById('hero-video');
-  var vids = document.querySelectorAll('video[data-autoplay]');
-  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var hero = document.getElementById("hero-video");
+  var vids = document.querySelectorAll("video[data-autoplay]");
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduce) {
-    if (hero) { hero.removeAttribute('autoplay'); hero.pause(); hero.controls = true; }
+    if (hero) { hero.removeAttribute("autoplay"); hero.pause(); hero.controls = true; }
     vids.forEach(function (v) { v.controls = true; });
     return;
   }
   if (hero) { var p = hero.play(); if (p && p.catch) { p.catch(function () {}); } }
-  if (!('IntersectionObserver' in window)) { return; }
+  if (!("IntersectionObserver" in window)) { vids.forEach(function (v) { v.preload = "auto"; v.play(); }); return; }
   var io = new IntersectionObserver(function (entries) {
     entries.forEach(function (e) {
       var v = e.target;
-      if (e.isIntersecting) {
-        v.preload = 'auto';
-        var r = v.play();
-        if (r && r.catch) { r.catch(function () {}); }
-      } else {
-        v.pause();
-      }
+      if (e.isIntersecting) { v.preload = "auto"; var r = v.play(); if (r && r.catch) { r.catch(function () {}); } }
+      else { v.pause(); }
     });
   }, { threshold: 0.35 });
   vids.forEach(function (v) { io.observe(v); });

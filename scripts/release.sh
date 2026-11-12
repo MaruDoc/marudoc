@@ -16,6 +16,8 @@ VERSION="${VERSION:-1.0.0}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-marudoc-notary}"
 
 cd "$ROOT"
+# All-Spaces panels must be built per use (Sources/EnsoApp/OverlayPanel.swift); a reused one can be stuck on one Space.
+scripts/check_overlay_windows.sh
 ARCHS=universal TIMESTAMP=1 VARIANT=direct SIGN_ID="$SIGN_ID" VERSION="$VERSION" BUILD_ROOT="$BUILD_ROOT" scripts/build_app.sh
 APP="$BUILD_ROOT/dist-direct/MaruDoc.app"
 

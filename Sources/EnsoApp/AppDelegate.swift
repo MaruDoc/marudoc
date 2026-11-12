@@ -130,6 +130,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let about = NSMenuItem(title: L("MaruDoc について"), action: #selector(openAbout), keyEquivalent: "")
         about.target = self
         menu.addItem(about)
+        #if !APPSTORE
+        // The only network use in MaruDoc, and only on this click (UpdateCheck.swift).
+        let updates = NSMenuItem(title: UpdateCheck.menuTitle, action: #selector(checkForUpdates), keyEquivalent: "")
+        updates.target = self
+        menu.addItem(updates)
+        #endif
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: L("MaruDoc を終了"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         item.menu = menu
@@ -156,6 +162,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func togglePress() { Settings.shared.pressEnabled.toggle() }
     @objc private func openSettings() { SettingsWindowController.shared.show() }
     @objc private func openAbout() { SettingsWindowController.shared.show(tab: .about) }
+    #if !APPSTORE
+    @objc private func checkForUpdates() { UpdateCheck.check() }
+    #endif
     @objc private func openAccessibility() { Permissions.askAccessibility() }
 
     // MARK: URL bridge (Finder extension)

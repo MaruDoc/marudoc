@@ -42,6 +42,9 @@ for d in Sources Resources scripts site; do
   extra=()
   # Test harnesses: not portable (absolute local paths, LibreOffice profiles).
   [[ "$d" == Sources ]] && extra=(--exclude='/officetest' --exclude='/pdftest')
+  # Maintainer-only release tooling (machine paths, hosts) and the Instagram reels hosted on the site (~150 MB).
+  [[ "$d" == scripts ]] && extra=(--exclude='/ship.sh' --exclude='/BUILDNUM' --exclude='/e2e')
+  [[ "$d" == site ]] && extra=(--exclude='/reels')
   rsync -a --delete "${EXCLUDES[@]}" ${extra[@]+"${extra[@]}"} "$SRC/$d/" "$DEST/$d/"
 done
 
@@ -50,7 +53,7 @@ mkdir -p "$DEST/docs"
 rsync -a --delete --include='08_セキュリティQ&A.md' --exclude='*' "$SRC/docs/" "$DEST/docs/"
 
 # Top-level files.
-for f in Package.swift README.md LICENSE SECURITY.md CONTRIBUTING.md .gitignore; do
+for f in Package.swift README.md LICENSE SECURITY.md CONTRIBUTING.md CHANGELOG.md .gitignore; do
   [[ -f "$SRC/$f" ]] || { echo "missing $f" >&2; exit 1; }
   rsync -a "$SRC/$f" "$DEST/$f"
 done

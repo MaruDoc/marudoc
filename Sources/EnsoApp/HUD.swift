@@ -145,7 +145,7 @@ final class HUDController {
         model.visible = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             guard let self, !self.model.visible else { return }
-            self.panel?.orderOut(nil)
+            self.discardPanel()
             self.onHidden?()
         }
     }
@@ -158,8 +158,15 @@ final class HUDController {
     }
 
     private func present() {
-        let panel = self.panel ?? makePanel()
-        self.panel = panel
+        // A panel that has been ordered out is never ordered front again (OverlayPanel explains why). The current one
+        // is reused only while it is still up, e.g. from progress to "done".
+        var panel: NSPanel
+        if let current = self.panel, current.isVisible {
+            panel = current
+        } else {
+            discardPanel()
+            panel = makePanel()
+        }
         guard let host = panel.contentView else { return }
         let size = host.fittingSize
         // Below the icon, centred; above it if there's no room.
@@ -169,25 +176,32 @@ final class HUDController {
         if origin.y < vf.minY { origin.y = anchor.maxY - 4 }
         origin.x = min(max(origin.x, vf.minX + 4), vf.maxX - size.width - 4)
         origin.y = min(max(origin.y, vf.minY + 4), vf.maxY - size.height - 4)
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        let frame = NSRect(origin: origin, size: size)
+        panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
+        // A panel the window server attached to another Space already reports that here; one new panel fixes it.
+        if let why = OverlayPanel.whyNotOnScreen(panel, includeOcclusion: false) {
+            Log.info("hud panel not on screen (present: \(why)): \(OverlayPanel.describe(panel)); new panel")
+            discardPanel()
+            panel = makePanel()
+            panel.setFrame(frame, display: true)
+            panel.orderFrontRegardless()
+        }
         if !model.visible { DispatchQueue.main.async { self.model.visible = true } }
     }
 
+    /// Builds a new panel and makes it the current one.
     private func makePanel() -> NSPanel {
-        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 70),
-                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        p.isOpaque = false
-        p.backgroundColor = .clear
-        p.hasShadow = false
-        p.level = .statusBar
-        p.hidesOnDeactivate = false
-        p.isReleasedWhenClosed = false
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        p.becomesKeyOnlyIfNeeded = true
         let host = NSHostingView(rootView: HUDView(model: model))
         host.sizingOptions = [.intrinsicContentSize]
-        p.contentView = host
+        let p = OverlayPanel.make(level: .statusBar, frame: NSRect(x: 0, y: 0, width: 320, height: 70), ignoresMouseEvents: false, content: host)
+        panel = p
         return p
+    }
+
+    private func discardPanel() {
+        guard let panel else { return }
+        self.panel = nil
+        OverlayPanel.discard(panel)
     }
 }

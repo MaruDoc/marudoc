@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Check for updates | MaruDoc</title>
+<meta name="description" content="The latest version of MaruDoc for Mac and what changed in each version.">
+<link rel="canonical" href="https://marudoc.app/update/">
+<link rel="icon" href="/img/favicon.png">
+<meta name="theme-color" content="#04060f">
+<style>
+  :root { --bg: #04060f; --text: #f4f6ff; --sub: #aab3d4; --dim: #7a84a8; --line: rgba(150, 180, 255, 0.14); --accent: #2f7bff; --accent2: #6e9bff; --ok: #30d158;
+    --chrome: linear-gradient(180deg, #ffffff 0%, #ffffff 42%, #c2cbe6 64%, #9eabd2 76%, #eef2ff 100%); }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--text); font: 17px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased;
+    background: radial-gradient(90% 40% at 50% 0%, #1c2757 0%, #0d1434 40%, #04060f 80%) no-repeat, #04060f; }
+  a { color: var(--accent2); }
+  main { max-width: 720px; margin: 0 auto; padding: 0 20px 96px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 18px 0 0; font-size: 14px; }
+  header a.brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 650; text-decoration: none; }
+  header img { width: 28px; height: 28px; }
+  h1 { font-size: clamp(32px, 6vw, 46px); line-height: 1.1; letter-spacing: -0.03em; margin: 64px 0 12px; font-weight: 740;
+    background: var(--chrome); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { color: var(--sub); font-size: 18px; margin: 0; }
+  .card { margin: 28px 0 0; padding: 22px; border-radius: 16px; border: 1px solid var(--line); background: rgba(13, 20, 52, 0.55); }
+  .card p { margin: 0 0 12px; color: var(--sub); }
+  .card p:last-child { margin-bottom: 0; }
+  .card b { color: var(--text); }
+  .ok b::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 9px; vertical-align: 2px; box-shadow: 0 0 8px rgba(48, 209, 88, 0.8); }
+  .btn { display: inline-block; color: #fff; background: var(--accent); border-radius: 980px; padding: 12px 24px; font-weight: 650; text-decoration: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 8px 30px rgba(47, 123, 255, 0.35); }
+  code { font: 13.5px ui-monospace, "SF Mono", Menlo, monospace; background: rgba(170, 190, 255, 0.1); padding: 2px 6px; border-radius: 5px; color: #dfe6ff; }
+  h2 { font-size: 22px; margin: 64px 0 4px; }
+  .rel { border-top: 1px solid var(--line); padding: 16px 0 4px; }
+  .rel h3 { margin: 0; font-size: 17px; }
+  .rel h3 span { color: var(--dim); font-weight: 500; font-size: 14px; margin-left: 8px; }
+  .rel ul { margin: 8px 0 12px; padding-left: 1.2em; color: var(--sub); font-size: 15.5px; }
+  .rel.new h3::after { content: "New"; margin-left: 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent2); }
+  [hidden] { display: none !important; }
+  footer { margin-top: 64px; font-size: 13.5px; color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+  <header><a class="brand" href="/"><img src="/img/icon.png" alt="">MaruDoc</a><a href="/">Home</a></header>
+  <h1>Check for updates</h1>
+  <p class="lead">The latest version is <b>1.0.5</b>, released 2026-11-12.</p>
+
+  <div class="card ok" id="current" hidden>
+    <p><b>You have the latest version.</b></p>
+    <p>MaruDoc 1.0.5 is running on your Mac. There is nothing to do.</p>
+  </div>
+
+  <div class="card" id="newer" hidden>
+    <p><b>MaruDoc 1.0.5 is available.</b> You have <span id="yours"></span>.</p>
+    <p>Download it, open the DMG and drag MaruDoc to Applications, replacing the old one. Your settings stay.</p>
+    <p><a class="btn" href="/MaruDoc.dmg">Download MaruDoc 1.0.5</a></p>
+    <p>Installed with Homebrew? Run <code>brew upgrade --cask marudoc</code>.</p>
+  </div>
+
+  <div class="card" id="plain">
+    <p>In MaruDoc, choose <b>Check for Updates…</b> from the menu bar icon to compare with the version on your Mac.</p>
+    <p><a class="btn" href="/MaruDoc.dmg">Download MaruDoc 1.0.5</a></p>
+    <p>The Mac App Store version updates through the App Store. Homebrew: <code>brew upgrade --cask marudoc</code>.</p>
+  </div>
+
+  <h2>What's new</h2>
+  <div id="notes">
+      <section class="rel" id="v1.0.5"><h3>1.0.5 <span>2026-11-12</span></h3><ul><li>Fixed the radial menu not appearing on some desktops (Spaces) when you press and hold a file. It happened after any app had been in full screen, and the fix in 1.0.4 did not cover it.</li><li>The small notice that shows a conversion&#x27;s progress and result had the same problem and now appears on every desktop.</li><li>Added Check for Updates (Internet Required) to the menu bar icon. Only when you click it, MaruDoc reads the latest version number from marudoc.app. Converting and editing still never use the network.</li></ul></section>
+      <section class="rel" id="v1.0.4"><h3>1.0.4 <span>2026-11-11</span></h3><ul><li>Fixed the radial menu sometimes not appearing when you press and hold a file in Finder or on the desktop. The menu now scales in without fading.</li></ul></section>
+      <section class="rel" id="v1.0.3"><h3>1.0.3 <span>2026-10-20</span></h3><ul><li>In the radial menu, the centre now reads &quot;Cancel&quot; when you move the pointer back to it. Releasing or clicking there closes the menu without running anything.</li></ul></section>
+      <section class="rel" id="v1.0.2"><h3>1.0.2 <span>2026-10-20</span></h3><ul><li>Pressing and holding a file near a screen edge no longer moves the pointer. The menu shifts to fit on screen and stays open after you let go, so you click an item to choose it.</li></ul></section>
+      <section class="rel" id="v1.0.1"><h3>1.0.1 <span>2026-10-20</span></h3><ul><li>After a press and hold, a lost mouse-up could leave the radial menu open and stop later presses from opening it.</li><li>Pressing again while the menu was fading out could hide the new menu.</li><li>The PDF editor stayed zoomed in after cropping or undoing, cutting off the page edges.</li><li>In &quot;Fix text&quot;, the original words showed through behind the input field.</li><li>Splitting Excel into CSV turned sheets with empty names into hidden files and overwrote sheets whose cleaned-up names matched.</li><li>Temporary files from converting and compressing were left behind.</li><li>Saved signatures are now readable only by you.</li></ul></section>
+      <section class="rel" id="v1.0.0"><h3>1.0.0 <span>2026-10-19</span></h3><ul><li>The first public release. Convert and edit from Finder&#x27;s right-click menu and the press-and-hold ring on the desktop. Combine PDFs and photos in the order you pick, split PDFs. No networking code, no data collection.</li></ul></section>
+  </div>
+  <footer>Check for Updates in MaruDoc reads only marudoc.app/version.json, and only when you click it. Your files never leave your Mac.</footer>
+</main>
+<script>
+(function () {
+  var LATEST = "1.0.5";
+  var v = new URLSearchParams(location.search).get("v");
+  if (!v || !/^\d+(\.\d+){0,3}/.test(v)) { return; }
+  v = v.match(/^\d+(\.\d+){0,3}/)[0];
+  var cmp = function (a, b) {
+    var x = a.split(".").map(Number), y = b.split(".").map(Number);
+    for (var i = 0; i < Math.max(x.length, y.length); i++) { var d = (x[i] || 0) - (y[i] || 0); if (d) { return d; } }
+    return 0;
+  };
+  document.getElementById("plain").hidden = true;
+  if (cmp(v, LATEST) >= 0) { document.getElementById("current").hidden = false; return; }
+  document.getElementById("newer").hidden = false;
+  document.getElementById("yours").textContent = v;
+  document.querySelectorAll(".rel").forEach(function (s) { if (cmp(s.id.slice(1), v) > 0) { s.classList.add("new"); } });
+})();
+</script>
+</body>
+</html>

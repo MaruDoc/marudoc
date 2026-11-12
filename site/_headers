@@ -11,3 +11,9 @@
   Content-Type: text/plain; charset=utf-8
 /llms.txt
   Content-Type: text/plain; charset=utf-8
+/reels/*
+  X-Robots-Tag: noindex
+  Content-Type: video/mp4
+/version.json
+  Content-Type: application/json; charset=utf-8
+  Cache-Control: no-cache
