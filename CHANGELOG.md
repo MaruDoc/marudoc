@@ -5,7 +5,7 @@ The newest version comes first. scripts/site_release.py reads this file to build
 ## 1.0.5 (2026-11-12)
 
 - Fixed the radial menu not appearing on some desktops (Spaces) when you press and hold a file. It happened after any app had been in full screen, and the fix in 1.0.4 did not cover it.
-- The small notice that shows a conversion's progress and result had the same problem and now appears on every desktop.
+- Two small notices, from the editor and the placement hint, had the same problem and now appear on every desktop.
 - Added Check for Updates (Internet Required) to the menu bar icon. Only when you click it, MaruDoc reads the latest version number from marudoc.app. Converting and editing still never use the network.
 
 ## 1.0.4 (2026-11-11)
