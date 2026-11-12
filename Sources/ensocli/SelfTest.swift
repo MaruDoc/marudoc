@@ -195,6 +195,10 @@ final class SelfTest {
         testSecurity()
         testHardening()
         await testSecurityRound2()
+        await testAuditPDF()
+        await testAuditImage()
+        await testAuditSheet()
+        await testAuditPptx()
         let d = fresh("fixtures")
         guard let fx = try? makeFixtures(d) else { check("fixtures", false); return 1 }
         await testDocuments(fx.md, fx.pdf)

@@ -8,14 +8,18 @@ import EnsoDoc
 /// each take a page when the result is written to a document). Per slide: the title placeholder becomes
 /// `.heading(level: 2)`, other text in reading order (top-to-bottom, then left-to-right) becomes paragraphs or
 /// list items, tables become `DocTable`, pictures become `DocImage`. Slide font sizes are not carried over
-/// (they are sized for projection). Speaker notes are added as `.quote` blocks when `includeNotes` is set.
+/// (they are sized for projection). Hidden slides are left out.
+///
+/// Speaker notes are added as `.quote` blocks after each slide's content when `includeNotes` is set; the first
+/// notes paragraph of a slide starts with `notesLabel` in bold (e.g. "ノート: …") when one is given, so notes stay
+/// recognisable in plain text, where quotes have no marker.
 public enum PptxReader {
-    public static func read(_ url: URL, includeNotes: Bool = false) throws -> DocModel {
-        try read(data: try Data.readOffice(url), includeNotes: includeNotes)
+    public static func read(_ url: URL, includeNotes: Bool = false, notesLabel: String? = nil) throws -> DocModel {
+        try read(data: try Data.readOffice(url), includeNotes: includeNotes, notesLabel: notesLabel)
     }
 
-    public static func read(data: Data, includeNotes: Bool = false) throws -> DocModel {
-        try PptxParser(zip: try ZipReader(data: data), includeNotes: includeNotes).parse()
+    public static func read(data: Data, includeNotes: Bool = false, notesLabel: String? = nil) throws -> DocModel {
+        try PptxParser(zip: try ZipReader(data: data), includeNotes: includeNotes, notesLabel: notesLabel).parse()
     }
 
     public static func mediaImages(_ url: URL) throws -> [(name: String, data: Data)] {
@@ -26,9 +30,12 @@ public enum PptxReader {
 private final class PptxParser {
     let zip: ZipReader
     let includeNotes: Bool
+    let notesLabel: String?
     var title: String?
 
-    init(zip: ZipReader, includeNotes: Bool) { self.zip = zip; self.includeNotes = includeNotes }
+    init(zip: ZipReader, includeNotes: Bool, notesLabel: String?) {
+        self.zip = zip; self.includeNotes = includeNotes; self.notesLabel = notesLabel
+    }
 
     func parse() throws -> DocModel {
         let main = try OPC.mainPart(zip, fallback: "ppt/presentation.xml")
@@ -38,9 +45,10 @@ private final class PptxParser {
 
         var blocks: [DocBlock] = []
         for sld in pres.child("p:sldIdLst")?.children("p:sldId") ?? [] {
-            if sld["show"] == "0" { continue } // hidden slide
+            if sld["show"] == "0" { continue } // hidden slide (some writers flag it here)
             guard let id = sld["r:id"], let rel = rels[id], !rel.external, zip.contains(rel.target) else { continue }
-            let slideBlocks = try readSlide(rel.target)
+            // nil = hidden slide. A slide that yields nothing gets no rule either, so no doubled rule is left behind.
+            guard let slideBlocks = try readSlide(rel.target), !slideBlocks.isEmpty else { continue }
             if !blocks.isEmpty { blocks.append(.horizontalRule) }
             blocks += slideBlocks
         }
@@ -53,18 +61,29 @@ private final class PptxParser {
 
     private var rels: [String: OPCRelationship] = [:]
     private var placeholderFrames: [String: CGRect] = [:]
+    /// Bullets set by list styles, per level (0-based). Layout placeholders are keyed like `placeholderFrames`;
+    /// master placeholders by `masterKey`. `masterBodyStyle` is the master's `p:txStyles/p:bodyStyle`.
+    private var layoutBullets: [String: [Int: Bullet]] = [:]
+    private var masterBullets: [String: [Int: Bullet]] = [:]
+    private var masterBodyStyle: [Int: Bullet] = [:]
+    private var haveMaster = false
 
-    func readSlide(_ part: String) throws -> [DocBlock] {
+    /// Returns nil for a hidden slide.
+    func readSlide(_ part: String) throws -> [DocBlock]? {
         let root = try XNode.parse(try zip.data(part), part: part)
+        // PowerPoint marks a hidden slide on the slide part's root (<p:sld show="0">), not on p:sldId.
+        if !OOXMLValue.onOff(root["show"] ?? "1") { return nil }
         let relList = try OPC.relationships(zip, for: part)
         rels = Dictionary(relList.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         placeholderFrames = [:]
+        layoutBullets = [:]; masterBullets = [:]; masterBodyStyle = [:]; haveMaster = false
         // Placeholders without their own position inherit it from the layout (and the layout from the master).
+        // Bullets are inherited the same way, level by level.
         if let layout = relList.first(where: { $0.isType("slideLayout") }), zip.contains(layout.target) {
             if let master = (try? OPC.relationships(zip, for: layout.target))?.first(where: { $0.isType("slideMaster") }) {
-                collectPlaceholderFrames(master.target)
+                collectPlaceholders(master.target, isMaster: true)
             }
-            collectPlaceholderFrames(layout.target)
+            collectPlaceholders(layout.target, isMaster: false)
         }
 
         var titleBlocks: [DocBlock] = []
@@ -91,11 +110,23 @@ private final class PptxParser {
         return rows.flatMap { $0.sorted { ($0.x ?? 0, $0.order) < ($1.x ?? 0, $1.order) } }
     }
 
-    private func collectPlaceholderFrames(_ part: String) {
+    private func collectPlaceholders(_ part: String, isMaster: Bool) {
         guard let d = try? zip.data(part), let root = try? XNode.parse(d, part: part) else { return }
         for sp in root.descendants("p:sp") {
-            guard let ph = sp.child("p:nvSpPr")?.child("p:nvPr")?.child("p:ph"), let frame = PptxParser.frame(sp.child("p:spPr")) else { continue }
-            for key in PptxParser.placeholderKeys(ph) { placeholderFrames[key] = frame }
+            guard let ph = sp.child("p:nvSpPr")?.child("p:nvPr")?.child("p:ph") else { continue }
+            if let frame = PptxParser.frame(sp.child("p:spPr")) {
+                for key in PptxParser.placeholderKeys(ph) { placeholderFrames[key] = frame }
+            }
+            let bullets = PptxParser.listStyleBullets(sp.child("p:txBody")?.child("a:lstStyle"))
+            if isMaster {
+                if masterBullets[PptxParser.masterKey(ph["type"])] == nil { masterBullets[PptxParser.masterKey(ph["type"])] = bullets }
+            } else {
+                for key in PptxParser.placeholderKeys(ph) where layoutBullets[key] == nil { layoutBullets[key] = bullets }
+            }
+        }
+        if isMaster, let style = root.child("p:txStyles")?.child("p:bodyStyle") {
+            haveMaster = true
+            masterBodyStyle = PptxParser.listStyleBullets(style)
         }
     }
 
@@ -106,6 +137,16 @@ private final class PptxParser {
         return keys
     }
 
+    /// The master has one placeholder per kind: layout and slide placeholders of any content type
+    /// (body, obj, subTitle, tbl, ...) inherit from its body placeholder, titles from its title.
+    static func masterKey(_ type: String?) -> String {
+        switch type {
+        case "title", "ctrTitle": return "title"
+        case "dt", "ftr", "sldNum", "hdr": return type!
+        default: return "body"
+        }
+    }
+
     static func frame(_ spPr: XNode?) -> CGRect? {
         guard let xfrm = spPr?.child("a:xfrm"), let off = xfrm.child("a:off"), let x = OOXMLValue.double(off["x"]),
               let y = OOXMLValue.double(off["y"]) else { return nil }
@@ -114,7 +155,8 @@ private final class PptxParser {
                       height: OOXMLValue.double(ext?["cy"]).map { $0 / 12700 } ?? 0)
     }
 
-    private func walk(_ tree: XNode, titleBlocks: inout [DocBlock], items: inout [Item]) {
+    /// `ink` is set while walking the fallback picture of an ink drawing (`p:contentPart`).
+    private func walk(_ tree: XNode, titleBlocks: inout [DocBlock], items: inout [Item], ink: Bool = false) {
         for n in tree.children {
             switch n.tag {
             case "p:sp":
@@ -136,11 +178,10 @@ private final class PptxParser {
                     }
                     continue
                 }
-                let bulletsByDefault = ph != nil && (type == nil || type == "body" || type == "obj")
-                let blocks = textBlocks(body, bulletsByDefault: bulletsByDefault)
+                let blocks = textBlocks(body, inherited: inheritedBullets(ph: ph, body: body))
                 if !blocks.isEmpty { items.append(Item(y: frame.map { Double($0.minY) }, x: frame.map { Double($0.minX) }, order: items.count, blocks: blocks)) }
             case "p:grpSp":
-                walk(n, titleBlocks: &titleBlocks, items: &items) // child offsets are in group space; close enough for ordering
+                walk(n, titleBlocks: &titleBlocks, items: &items, ink: ink) // child offsets are in group space; close enough for ordering
             case "p:graphicFrame":
                 guard let tbl = n.firstDescendant("a:tbl"), let t = table(tbl) else { continue }
                 let f = n.child("p:xfrm").flatMap { x -> CGRect? in
@@ -149,15 +190,27 @@ private final class PptxParser {
                 }
                 items.append(Item(y: f.map { Double($0.minY) }, x: f.map { Double($0.minX) }, order: items.count, blocks: [.table(t)]))
             case "p:pic":
-                guard let embed = n.firstDescendant("a:blip")?["r:embed"], let rel = rels[embed], !rel.external,
+                guard let blip = n.firstDescendant("a:blip"), let embed = blip["r:embed"], let rel = rels[embed], !rel.external,
                       let data = try? zip.data(rel.target) else { continue }
                 let frame = PptxParser.frame(n.child("p:spPr"))
                 let alt = n.child("p:nvPicPr")?.child("p:cNvPr")?["descr"]
-                if let img = OfficeImage.docImage(from: data, widthPt: frame.map { Double($0.width) }, heightPt: frame.map { Double($0.height) }, alt: alt) {
+                var adjust = PptxParser.pictureAdjust(blipFill: n.child("p:blipFill"), blip: blip, xfrm: n.child("p:spPr")?.child("a:xfrm"))
+                adjust.darkenNearWhite = ink
+                if let img = OfficeImage.docImage(from: data, widthPt: frame.map { Double($0.width) }, heightPt: frame.map { Double($0.height) }, alt: alt, adjust: adjust) {
                     items.append(Item(y: frame.map { Double($0.minY) }, x: frame.map { Double($0.minX) }, order: items.count, blocks: [.image(img)]))
                 }
             case "mc:AlternateContent":
-                if let choice = n.child("mc:Choice") { walk(choice, titleBlocks: &titleBlocks, items: &items) }
+                // The Choice is the richer form; the Fallback is the same content as plain shapes or a picture.
+                // Ink (p:contentPart) cannot be read here, and its Fallback is a picture of the strokes. Any other
+                // Choice that yields nothing also falls back.
+                let choice = n.child("mc:Choice"), fallback = n.child("mc:Fallback")
+                let inkChoice = choice?.contains("p:contentPart") ?? false
+                if let choice, !inkChoice {
+                    let before = titleBlocks.count + items.count
+                    walk(choice, titleBlocks: &titleBlocks, items: &items, ink: ink)
+                    if titleBlocks.count + items.count > before { continue }
+                }
+                if let fallback { walk(fallback, titleBlocks: &titleBlocks, items: &items, ink: ink || inkChoice) }
             default:
                 break
             }
@@ -167,15 +220,51 @@ private final class PptxParser {
     // MARK: Text
 
     private struct PPara { var runs: [DocRun]; var level: Int; var bullet: Bullet; var alignment: DocAlignment }
-    private enum Bullet { case none, char, number(start: Int), inherit }
+    fileprivate enum Bullet { case none, char, number(start: Int), inherit }
+
+    /// The bullet a paragraph property element (a:pPr, a:lvlNpPr) sets, or `.inherit` when it sets none.
+    private static func bullet(_ pPr: XNode?) -> Bullet {
+        guard let pPr else { return .inherit }
+        if pPr.child("a:buNone") != nil { return .none }
+        if pPr.child("a:buChar") != nil || pPr.child("a:buBlip") != nil { return .char }
+        if let num = pPr.child("a:buAutoNum") { return .number(start: OOXMLValue.clamp(OOXMLValue.int(num["startAt"]) ?? 1, 1, 32767)) }
+        return .inherit
+    }
+
+    /// Bullets a list style (a:lstStyle, p:bodyStyle) sets, by level (lvl1pPr = level 0).
+    private static func listStyleBullets(_ style: XNode?) -> [Int: Bullet] {
+        var out: [Int: Bullet] = [:]
+        for level in 0..<9 {
+            let b = bullet(style?.child("a:lvl\(level + 1)pPr"))
+            if case .inherit = b { continue }
+            out[level] = b
+        }
+        return out
+    }
+
+    /// What a paragraph without its own bullet setting shows, per level, following PowerPoint's inheritance:
+    /// the shape's own list style, then (placeholders only) the layout placeholder, the master placeholder and the
+    /// master's body text style. A level nothing sets has no bullet. Without a master body style to go by, the old
+    /// rule is kept (body and content placeholders are bulleted).
+    private func inheritedBullets(ph: XNode?, body: XNode) -> (Int) -> Bullet {
+        let own = PptxParser.listStyleBullets(body.child("a:lstStyle"))
+        guard let ph else { return { own[$0] ?? .none } }
+        let type = ph["type"]
+        let layout = PptxParser.placeholderKeys(ph).lazy.compactMap { self.layoutBullets[$0] }.first ?? [:]
+        let masterKey = PptxParser.masterKey(type)
+        let master = masterBullets[masterKey] ?? [:]
+        let style = masterKey == "body" ? masterBodyStyle : [:]
+        let fallback: Bullet = (type == nil || type == "body" || type == "obj") ? .char : .none
+        let known = haveMaster
+        return { level in
+            own[level] ?? layout[level] ?? master[level] ?? style[level] ?? (known ? .none : fallback)
+        }
+    }
 
     private func paragraphsOf(_ body: XNode) -> [PPara] {
         body.children("a:p").map { p in
             let pPr = p.child("a:pPr")
-            var bullet = Bullet.inherit
-            if pPr?.child("a:buNone") != nil { bullet = .none }
-            else if pPr?.child("a:buChar") != nil || pPr?.child("a:buBlip") != nil { bullet = .char }
-            else if let num = pPr?.child("a:buAutoNum") { bullet = .number(start: OOXMLValue.clamp(OOXMLValue.int(num["startAt"]) ?? 1, 1, 32767)) }
+            let bullet = PptxParser.bullet(pPr)
             let level = min(max(OOXMLValue.int(pPr?["lvl"]) ?? 0, 0), 8)
             let align: DocAlignment
             switch pPr?["algn"] {
@@ -207,8 +296,12 @@ private final class PptxParser {
         run.italic = OOXMLValue.onOff(rPr["i"] ?? "0")
         if let u = rPr["u"], u != "none" { run.underline = true }
         if let s = rPr["strike"], s != "noStrike" { run.strikethrough = true }
-        if let hex = rPr.child("a:solidFill")?.child("a:srgbClr")?["val"], hex.uppercased() != "000000" { run.color = DocColor(hex: hex) }
         if let hex = rPr.child("a:highlight")?.child("a:srgbClr")?["val"] { run.highlight = DocColor(hex: hex) }
+        if let hex = rPr.child("a:solidFill")?.child("a:srgbClr")?["val"], hex.uppercased() != "000000", let c = DocColor(hex: hex) {
+            // Slide backgrounds and shape fills are not carried over, so the text lands on a white page. White or
+            // pale text that relied on a dark fill would vanish there; a highlighted run keeps its own pairing.
+            run.color = run.highlight == nil ? PptxParser.readableOnWhite(c) : c
+        }
         for tag in ["a:ea", "a:latin"] {
             if let f = rPr.child(tag)?["typeface"], !f.isEmpty, !f.hasPrefix("+") {
                 if tag == "a:ea" && !text.unicodeScalars.contains(where: { $0.value >= 0x2E80 }) { continue }
@@ -224,13 +317,15 @@ private final class PptxParser {
         return run
     }
 
-    private func textBlocks(_ body: XNode, bulletsByDefault: Bool) -> [DocBlock] {
+    private func textBlocks(_ body: XNode, inherited: (Int) -> Bullet) -> [DocBlock] {
         var out: [DocBlock] = []
         var counters: [Int: Int] = [:]
         for p in paragraphsOf(body) {
             let para = DocParagraph(p.runs, alignment: p.alignment).normalized()
             if para.isEmpty { continue }
-            switch p.bullet {
+            var bullet = p.bullet
+            if case .inherit = bullet { bullet = inherited(p.level) }
+            switch bullet {
             case .char:
                 out.append(.listItem(DocListItem(ordered: false, level: p.level, paragraph: para)))
             case .number(let start):
@@ -238,13 +333,55 @@ private final class PptxParser {
                 counters[p.level] = n
                 counters = counters.filter { $0.key <= p.level }
                 out.append(.listItem(DocListItem(ordered: true, level: p.level, number: n, paragraph: para)))
-            case .inherit where bulletsByDefault:
-                out.append(.listItem(DocListItem(ordered: false, level: p.level, paragraph: para)))
             case .none, .inherit:
                 out.append(.paragraph(para))
             }
         }
         return out
+    }
+
+    // MARK: Colour and pictures
+
+    /// Minimum contrast ratio against white (WCAG 2 formula) for text colours. 3:1 is WCAG's floor for large text
+    /// and graphics; it keeps pure red (4.0:1), Office's dark red, blues and greens as they are.
+    static let minContrast = 3.0
+
+    static func contrastOnWhite(_ c: DocColor) -> Double {
+        func lin(_ v: Double) -> Double { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        let l = 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+        return 1.05 / (l + 0.05)
+    }
+
+    /// A text colour that can be read on a white page: colours with enough contrast are kept; pale greys and white
+    /// become the default text colour (nil); pale but clearly coloured text (yellow, light blue...) is darkened
+    /// just enough to reach `minContrast`, keeping its hue.
+    static func readableOnWhite(_ c: DocColor) -> DocColor? {
+        if contrastOnWhite(c) >= minContrast { return c }
+        if max(c.r, c.g, c.b) - min(c.r, c.g, c.b) < 0.15 { return nil }
+        var lo = 0.0, hi = 1.0   // scale factor: lo always readable, hi not
+        for _ in 0..<24 {
+            let k = (lo + hi) / 2
+            if contrastOnWhite(DocColor(r: c.r * k, g: c.g * k, b: c.b * k)) >= minContrast { lo = k } else { hi = k }
+        }
+        return DocColor(r: c.r * lo, g: c.g * lo, b: c.b * lo)
+    }
+
+    /// Crop (a:srcRect), rotation and flips (a:xfrm) and transparency (a:alphaModFix) of a picture.
+    static func pictureAdjust(blipFill: XNode?, blip: XNode, xfrm: XNode?) -> OfficeImage.Adjust {
+        var a = OfficeImage.Adjust()
+        if let r = blipFill?.child("a:srcRect") {
+            func f(_ k: String) -> Double { (OOXMLValue.double(r[k]) ?? 0) / 100_000 }
+            a.crop = (f("l"), f("t"), f("r"), f("b"))
+        }
+        if let xfrm {
+            a.rotation = (OOXMLValue.double(xfrm["rot"]) ?? 0) / 60_000
+            a.flipH = OOXMLValue.onOff(xfrm["flipH"] ?? "0")
+            a.flipV = OOXMLValue.onOff(xfrm["flipV"] ?? "0")
+        }
+        if let amt = OOXMLValue.double(blip.child("a:alphaModFix")?["amt"] ?? "100000") {
+            a.opacity = min(max(amt / 100_000, 0), 1)
+        }
+        return a
     }
 
     private func table(_ tbl: XNode) -> DocTable? {
@@ -275,8 +412,12 @@ private final class PptxParser {
         for sp in root.descendants("p:sp") {
             guard sp.child("p:nvSpPr")?.child("p:nvPr")?.child("p:ph")?["type"] == "body", let body = sp.child("p:txBody") else { continue }
             for p in paragraphsOf(body) {
-                let para = DocParagraph(p.runs).normalized()
-                if !para.isEmpty { out.append(.quote(para)) }
+                var para = DocParagraph(p.runs).normalized()
+                if para.isEmpty { continue }
+                if out.isEmpty, let label = notesLabel, !label.isEmpty {
+                    para.runs.insert(DocRun(label + ": ", bold: true), at: 0)
+                }
+                out.append(.quote(para))
             }
         }
         return out

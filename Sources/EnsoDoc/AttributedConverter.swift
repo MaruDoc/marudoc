@@ -139,6 +139,17 @@ public enum AttributedConverter {
                 table.layoutAlgorithm = .automaticLayoutAlgorithm
                 table.collapsesBorders = true
                 table.setContentWidth(100, type: .percentageValueType)
+                // Tables that carry the source's column widths (pptx, docx, PDF) keep their proportions; the others
+                // are laid out by content exactly as before.
+                let widths = columnPercentages(t, columns: cols, contentWidth: style.contentWidth)
+                if widths != nil { table.layoutAlgorithm = .fixedLayoutAlgorithm }
+                func setWidth(_ block: NSTextTableBlock, _ col: Int, _ span: Int) {
+                    guard let widths else { return }
+                    let lo = min(col, cols), hi = min(col + span, cols)
+                    // A merged cell also covers the padding and borders between the columns it spans.
+                    let gaps = Double(max(hi - lo - 1, 0)) * cellOverheadPercent(contentWidth: style.contentWidth)
+                    block.setValue(widths[lo..<hi].reduce(0, +) + gaps, type: .percentageValueType, for: .width)
+                }
                 for (r, row) in t.rows.enumerated() {
                     var col = 0
                     for cell in row {
@@ -146,6 +157,7 @@ public enum AttributedConverter {
                         block.setWidth(0.5, type: .absoluteValueType, for: .border)
                         block.setBorderColor(NSColor(white: 0.62, alpha: 1))
                         block.setWidth(4, type: .absoluteValueType, for: .padding)
+                        setWidth(block, col, max(1, cell.colSpan))
                         if r < t.headerRows { block.backgroundColor = NSColor(white: 0.93, alpha: 1) }
                         let ps = paraStyle(after: 0, lineHeight: 1.2)
                         ps.textBlocks = [block]
@@ -158,6 +170,11 @@ public enum AttributedConverter {
                         let block = NSTextTableBlock(table: table, startingRow: r, rowSpan: 1, startingColumn: col, columnSpan: 1)
                         block.setWidth(0.5, type: .absoluteValueType, for: .border)
                         block.setBorderColor(NSColor(white: 0.62, alpha: 1))
+                        if widths != nil {
+                            // Same padding as real cells, or the fixed widths would not line up with the rows above.
+                            block.setWidth(4, type: .absoluteValueType, for: .padding)
+                            setWidth(block, col, 1)
+                        }
                         let ps = paraStyle(after: 0); ps.textBlocks = [block]
                         append(runs: [DocRun("")], size: body * 0.95, paragraph: ps)
                         col += 1
@@ -198,6 +215,25 @@ public enum AttributedConverter {
         }
         return out
     }
+
+    /// Each column's share of the table, as percentages of the content width, from `columnWidths`; nil when the
+    /// table has none (or they do not fit its columns). Like the Word writer, only ratios are used, and every column
+    /// keeps at least 40 % of an even share so a hairline column cannot squeeze its text to a character per line.
+    /// The percentages leave room for the cells' padding and borders, which TextKit adds outside a block's width.
+    static func columnPercentages(_ t: DocTable, columns n: Int, contentWidth: CGFloat) -> [Double]? {
+        guard let w = t.columnWidths, w.count == n, n > 0, w.allSatisfy({ $0 > 0 && $0.isFinite }) else { return nil }
+        let top = w.max() ?? 1
+        var share = w.map { $0 / top }
+        let minShare = 0.4 / Double(n)
+        let total = share.reduce(0, +)
+        share = share.map { max(minShare, $0 / total) }
+        let sum = share.reduce(0, +)
+        let usable = max(100 - Double(n) * cellOverheadPercent(contentWidth: contentWidth), 50)
+        return share.map { $0 / sum * usable }
+    }
+
+    /// A cell's 4 pt padding on each side plus its 0.5 pt borders, as a percentage of the content width.
+    static func cellOverheadPercent(contentWidth: CGFloat) -> Double { 9 / Double(max(contentWidth, 100)) * 100 }
 
     // MARK: NSAttributedString -> DocModel
 

@@ -41,7 +41,10 @@ enum Prompts {
         @LocalState private var pw = ""
         @LocalState private var confirm = ""
 
-        var valid: Bool { removing ? !pw.isEmpty : (!pw.isEmpty && pw == confirm) }
+        /// A new password must be one the engine can really apply (ASCII); one being removed may be anything the
+        /// file was made with.
+        var unsupported: Bool { !removing && !pw.isEmpty && !PDFPassword.isSupported(pw) }
+        var valid: Bool { removing ? !pw.isEmpty : (!pw.isEmpty && pw == confirm && !unsupported) }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
@@ -50,6 +53,9 @@ enum Prompts {
                               : String(format: L("「%@」を開くときにパスワードを求める複製を作ります。"), fileName))
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 SecureField(L("パスワード"), text: $pw).textFieldStyle(.roundedBorder)
+                if unsupported {
+                    Text(PDFPassword.rule).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                }
                 if !removing {
                     SecureField(L("確認のためもう一度"), text: $confirm).textFieldStyle(.roundedBorder)
                     if !confirm.isEmpty && pw != confirm {

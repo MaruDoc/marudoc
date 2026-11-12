@@ -23,29 +23,85 @@ public enum PDFOCR {
 
     /// Recognises text lines in an image with Vision (accurate mode, language correction on).
     public static func recognize(image: CGImage, languages: [String] = ["ja-JP", "en-US"]) -> [OCRLine] {
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
-        if VNRecognizeTextRequest.supportedRevisions.contains(VNRecognizeTextRequestRevision3) {
-            request.revision = VNRecognizeTextRequestRevision3
-        }
-        let supported = (try? request.supportedRecognitionLanguages()) ?? []
+        let probe = VNRecognizeTextRequest()
+        if VNRecognizeTextRequest.supportedRevisions.contains(VNRecognizeTextRequestRevision3) { probe.revision = VNRecognizeTextRequestRevision3 }
+        let supported = (try? probe.supportedRecognitionLanguages()) ?? []
         let langs = languages.filter { l in supported.contains(l) || supported.contains { $0.hasPrefix(String(l.prefix(2))) } }
-        if !langs.isEmpty { request.recognitionLanguages = langs }
-        request.minimumTextHeight = 0.004
-        let handler = VNImageRequestHandler(cgImage: image, options: [:])
-        do { try handler.perform([request]) } catch { return [] }
+        let lines = (try? readLines(image, languages: langs) { request in
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            if VNRecognizeTextRequest.supportedRevisions.contains(VNRecognizeTextRequestRevision3) {
+                request.revision = VNRecognizeTextRequestRevision3
+            }
+            request.minimumTextHeight = 0.004
+        }) ?? []
         let w = CGFloat(image.width), h = CGFloat(image.height)
         var out: [OCRLine] = []
-        for obs in request.results ?? [] {
-            guard let cand = obs.topCandidates(1).first else { continue }
-            let text = cand.string.trimmingCharacters(in: .whitespaces)
+        for line in lines {
+            let text = line.text.trimmingCharacters(in: .whitespaces)
             guard !text.isEmpty else { continue }
-            let b = obs.boundingBox
+            let b = line.box
             out.append(OCRLine(text: text, boundingBox: CGRect(x: b.minX * w, y: b.minY * h, width: b.width * w, height: b.height * h),
-                               confidence: cand.confidence))
+                               confidence: line.confidence))
         }
         return out
+    }
+
+    /// Vision's text lines (box normalised, origin bottom-left) in reading order.
+    ///
+    /// The language order decides how every line is read: with Japanese first, English lines come back with
+    /// full-width punctuation and look-alike characters ("Total：", "×" for X, "Bi11" for Bill). So when Japanese
+    /// (or Chinese / Korean) is first and English is also allowed, lines that came back with no CJK characters but
+    /// with real words are read a second time with English first, and that reading replaces them. Lines with any
+    /// CJK character keep the first reading, so Japanese text is recognised exactly as before. The second pass only
+    /// runs when such lines exist.
+    public static func readLines(_ image: CGImage, languages: [String], configure: (VNRecognizeTextRequest) -> Void) throws
+        -> [(text: String, box: CGRect, confidence: Float)] {
+        func pass(_ langs: [String]) throws -> [(text: String, box: CGRect, confidence: Float)] {
+            let request = VNRecognizeTextRequest()
+            configure(request)
+            if !langs.isEmpty { request.recognitionLanguages = langs }
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+            return (request.results ?? []).compactMap { o in o.topCandidates(1).first.map { ($0.string, o.boundingBox, $0.confidence) } }
+        }
+        let first = try pass(languages)
+        guard let latinFirst = latinFirstOrder(languages), first.contains(where: { readAgain($0.text) }),
+              let second = try? pass(latinFirst) else { return first }
+        func overlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
+            let i = a.intersection(b)
+            guard !i.isNull else { return 0 }
+            let u = a.width * a.height + b.width * b.height - i.width * i.height
+            return u > 0 ? i.width * i.height / u : 0
+        }
+        return first.map { line in
+            guard readAgain(line.text),
+                  let best = second.max(by: { overlap($0.box, line.box) < overlap($1.box, line.box) }),
+                  overlap(best.box, line.box) >= 0.5, !hasCJK(best.text) else { return line }
+            return (best.text, line.box, best.confidence)
+        }
+    }
+
+    /// The same languages with English moved to the front, when a CJK language leads and English is allowed.
+    static func latinFirstOrder(_ languages: [String]) -> [String]? {
+        guard let lead = languages.first, ["ja", "zh", "ko"].contains(String(lead.prefix(2))),
+              let en = languages.first(where: { $0.hasPrefix("en") }) else { return nil }
+        return [en] + languages.filter { $0 != en }
+    }
+
+    /// A line worth a second, English-first reading: no CJK characters and at least three Latin letters
+    /// (digit-only fragments such as page numbers are read the same either way).
+    static func readAgain(_ s: String) -> Bool {
+        !hasCJK(s) && s.unicodeScalars.filter { ("a"..."z").contains($0) || ("A"..."Z").contains($0) }.count >= 3
+    }
+
+    /// Kana, CJK ideographs or Hangul. Punctuation such as "：" or "・" does not count: that is what an
+    /// English line read Japanese-first picks up.
+    static func hasCJK(_ s: String) -> Bool {
+        s.unicodeScalars.contains { u in
+            let v = u.value
+            return (0x3041...0x3096).contains(v) || (0x30A1...0x30FA).contains(v) || (0x3400...0x4DBF).contains(v)
+                || (0x4E00...0x9FFF).contains(v) || (0xF900...0xFAFF).contains(v) || (0xAC00...0xD7AF).contains(v)
+        }
     }
 
     /// True when the page has (almost) no extractable text but shows a scan or outlined text.

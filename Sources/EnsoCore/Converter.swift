@@ -44,7 +44,7 @@ struct Converter {
                                        displayWidth: Double(ps.width), displayHeight: Double(ps.height)))
                 progress(Double(i + 1) / Double(doc.pageCount) * 0.9)
             }
-            let notes = (0..<doc.pageCount).map { doc.page(at: $0)?.string ?? "" }
+            let notes = (0..<doc.pageCount).map { TextExtraction.plain(doc.page(at: $0)?.string) }
             let out = OutputNamer.file(for: file, ext: "pptx")
             try Formats.writePptx(slides: slides, size: size, notes: notes, to: out)
             return [out]
@@ -64,6 +64,9 @@ struct Converter {
         case (.spreadsheet, "csv"):
             let wb = try Formats.readXlsx(file)
             let sheets = wb.sheets.filter { !$0.rows.isEmpty }
+            // Nothing visible to write (an empty workbook, or one whose only data is in hidden sheets): say so
+            // instead of "succeeding" with an empty file.
+            guard !sheets.isEmpty else { throw EngineError.failed(L("表や文字が見つかりませんでした")) }
             if sheets.count <= 1 {
                 let out = OutputNamer.file(for: file, ext: "csv")
                 try Formats.writeCSV(sheets.first ?? Sheet(name: "", rows: []), to: out)
@@ -89,12 +92,14 @@ struct Converter {
             return [out]
         case (.spreadsheet, _), (.csv, _):
             let wb: Workbook = kind == .csv ? Workbook(sheets: [try Formats.readCSV(file)]) : try Formats.readXlsx(file)
+            guard wb.sheets.contains(where: { !$0.rows.isEmpty }) else { throw EngineError.failed(L("表や文字が見つかりませんでした")) }
             let model = DocumentReader.model(from: wb, title: file.deletingPathExtension().lastPathComponent)
             return try await write(model, near: file, as: target)
 
         // Documents
         case (.word, _), (.rtf, _), (.markdown, _), (.text, _), (.html, _), (.presentation, _):
-            let model = try await DocumentReader.model(of: file, kind: kind)
+            // Speaker notes go into the outputs people read or edit as a document; a PDF or a picture shows the slides only.
+            let model = try await DocumentReader.model(of: file, kind: kind, includeNotes: ["docx", "md", "txt"].contains(target))
             if Self.imageTargets.contains(target) {
                 // Lay out as PDF, then render pages.
                 let pdfData = PDFRenderer.pdfData(from: model)
@@ -184,7 +189,7 @@ struct Converter {
             let tables = model.blocks.compactMap { b -> DocTable? in if case .table(let t) = b { return t }; return nil }
             guard !tables.isEmpty else { throw EngineError.failed(L("表が見つかりませんでした")) }
             let sheets = tables.enumerated().map { i, t in
-                Sheet(name: "\(L("表")) \(i + 1)", rows: t.rows.map { $0.map { CellValue.guess($0.text) } })
+                Sheet(name: "\(L("表")) \(i + 1)", rows: t.rows.map { $0.map { CellValue.typed($0.text) } })
             }
             let out = OutputNamer.file(for: input, ext: "xlsx")
             try Formats.writeXlsx(Workbook(sheets: sheets), to: out)
@@ -198,7 +203,7 @@ struct Converter {
 /// Reads any supported document into a DocModel.
 public enum DocumentReader {
 
-    public static func model(of file: URL, kind: FileKind? = nil) async throws -> DocModel {
+    public static func model(of file: URL, kind: FileKind? = nil, includeNotes: Bool = false) async throws -> DocModel {
         let kind = kind ?? FileKind.of(file)
         let title = file.deletingPathExtension().lastPathComponent
         var model: DocModel
@@ -221,7 +226,7 @@ public enum DocumentReader {
         case .text:
             model = PlainTextReader.model(from: PlainTextReader.decode(try Data(contentsOf: file)))
         case .presentation:
-            model = try Formats.readPptx(file)
+            model = try Formats.readPptx(file, includeNotes: includeNotes)
         case .spreadsheet:
             model = Self.model(from: try Formats.readXlsx(file), title: title)
         case .csv:

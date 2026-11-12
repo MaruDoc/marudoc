@@ -163,7 +163,7 @@ extension SelfTest {
             check("csv: formula text gets a leading quote", line.hasPrefix("'=1+1,"), line)
             check("csv: text that is a plain number is left alone", line.contains(",-5,+1.5,-5,"), line)
             check("csv: @ and - formulas are prefixed", line.contains(",'@SUM(A1),") && line.contains("'-cmd|"), line)
-            check("csv: tab, CR and a lone minus are prefixed", line.contains("'\tx") && line.contains(",'-,") && line.contains("\"'\rx\""), line)
+            check("csv: a lone minus and tab/CR-led text without a formula are left alone", line.contains(",\tx,") && line.contains(",-,") && line.contains("\"\rx\""), line)
             check("csv: ordinary text is untouched", line.contains(",plain,"), line)
             check("csv: quoted formula with commas keeps its quote", line.contains("\"'=HYPERLINK(\"\"u\"\",\"\"c\"\")\""), line)
             check("csv: negative number cells are untouched", CSVCodec.neutralizingFormula("-5") == "-5" && CSVCodec.neutralizingFormula("+1.5") == "+1.5")

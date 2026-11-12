@@ -2,8 +2,10 @@ import AppKit
 import PDFKit
 import Quartz
 import ImageIO
+import UniformTypeIdentifiers
 import EnsoShared
 import EnsoDoc
+import EnsoPDF
 
 enum Rasterizer {
 
@@ -28,7 +30,8 @@ enum Rasterizer {
         ctx.scaleBy(x: scale, y: scale)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
-        page.transform(ctx, for: .cropBox)
+        // draw(with:to:) applies the page's rotation and crop-box origin itself (PDFPage.h, macOS 10.12+). Calling
+        // transform(_:for:) first applied them twice: rotated pages came out blank, upside down or shifted.
         page.draw(with: .cropBox, to: ctx)
         NSGraphicsContext.restoreGraphicsState()
         return ctx.makeImage()
@@ -71,6 +74,26 @@ enum Rasterizer {
 public enum PDFPageFactory {
     /// A page for an image, sized like the engine does (not one point per pixel).
     public static func page(forImage url: URL) -> PDFPage? { PDFOps.imagePage(url) }
+}
+
+/// Which passwords "Set password" can really apply. Shared by the engine and the app's password prompt.
+public enum PDFPassword {
+    /// Printable ASCII only. The only encryption PDFKit / CGPDFContext can write (standard security handler, RC4)
+    /// takes ASCII passwords; PDFKit writes an unencrypted file when given anything else.
+    public static func isSupported(_ password: String) -> Bool {
+        !password.isEmpty && password.unicodeScalars.allSatisfy { (0x20...0x7E).contains($0.value) }
+    }
+
+    public static var rule: String { L("パスワードに使えるのは半角の英字・数字・記号とスペースだけです") }
+
+    /// True when the file at `url` opens only with a password, and opens with `password` and with `owner`.
+    static func isProtected(_ url: URL, password: String, owner: String, pageCount: Int) -> Bool {
+        guard let plain = PDFDocument(url: url), plain.isEncrypted, plain.isLocked, !plain.unlock(withPassword: "") else { return false }
+        for pw in Set([password, owner]) {
+            guard let d = PDFDocument(url: url), d.unlock(withPassword: pw), !d.isLocked, d.pageCount == pageCount else { return false }
+        }
+        return true
+    }
 }
 
 enum PDFOps {
@@ -136,9 +159,24 @@ enum PDFOps {
     /// A4 (595 x 842 pt) page, portrait or landscape to match the picture as displayed. The picture is drawn at its
     /// full pixel size, scaled to fit and centred. EXIF orientation is applied through the drawing transform, so the
     /// stored pixels go into the PDF untouched (a JPEG can stay a JPEG).
+    /// Lossy photo formats other than JPEG (camera RAW is checked by conformance).
+    static let photoTypes: Set<String> = ["public.heic", "public.heics", "public.heif", "public.avif", "public.avci", "public.avis",
+                                          "org.webmproject.webp", "public.jpeg-2000", "public.jpeg-xl", "public.mpo-image"]
+
     static func a4ImagePage(_ url: URL) -> (PDFDocument, PDFPage)? {
-        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil), ImageCodec.isWithinLimits(src),
-              let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        guard !ImageFile.isTruncated(url), let src = CGImageSourceCreateWithURL(url as CFURL, nil), ImageCodec.isWithinLimits(src),
+              var img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        // The PDF context keeps a JPEG source as JPEG but stores every other picture losslessly (one iPhone HEIC
+        // photo became 28 MB). Photos in other lossy camera formats are re-encoded as JPEG at the single-image path's
+        // quality (0.9); pictures with an alpha channel stay lossless so their transparency survives. PNG / TIFF / GIF
+        // stay lossless too: as JPEG a 1-bit scan grew almost 5 times and screenshots get blurry.
+        let typeID = CGImageSourceGetType(src) as String? ?? ""
+        let photoFormat = Self.photoTypes.contains(typeID) || (UTType(typeID)?.conforms(to: .rawImage) ?? false)
+        let hasAlpha = ![CGImageAlphaInfo.none, .noneSkipFirst, .noneSkipLast].contains(img.alphaInfo)
+        if photoFormat, !hasAlpha, let jpeg = ImageCodec.encode(img, as: .jpeg, quality: 0.9),
+           let js = CGImageSourceCreateWithData(jpeg as CFData, nil), let j = CGImageSourceCreateImageAtIndex(js, 0, nil) {
+            img = j   // same stored pixels, so the orientation transform below still applies unchanged
+        }
         let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
         let orientation = (props?[kCGImagePropertyOrientation] as? NSNumber)?.uint32Value ?? 1
         let m = ImageOps.orientationMatrices[orientation] ?? [1, 0, 0, 1]
@@ -244,11 +282,29 @@ enum PDFOps {
 
     static func rotate(_ file: URL, by degrees: Int) throws -> SafeWrite.Backup {
         let doc = try open(file)
+        // An encrypted PDF that opens without a password is owner-protected. Without the owner password it can only
+        // be written back unprotected (and PDFKit ignores the rotation when changes are forbidden), so refuse
+        // before anything is written: the original stays byte-identical.
+        if doc.isEncrypted { throw EngineError.failed(L("この PDF は保護されているため回転できません")) }
+        var expected: [Int] = []
         for i in 0..<doc.pageCount {
-            guard let p = doc.page(at: i) else { continue }
-            p.rotation = ((p.rotation + degrees) % 360 + 360) % 360
+            guard let p = doc.page(at: i) else { throw EngineError.failed(L("ページを回転できませんでした")) }
+            let r = ((p.rotation + degrees) % 360 + 360) % 360
+            p.rotation = r
+            expected.append(r)
         }
-        return try SafeWrite.replace(file) { tmp in try save(doc, to: tmp) }
+        // Never report a rotation that did not happen: check the document, then the file actually written,
+        // before it replaces the original.
+        func rotated(_ d: PDFDocument) -> Bool {
+            d.pageCount == expected.count && expected.indices.allSatisfy { d.page(at: $0)?.rotation == expected[$0] }
+        }
+        guard rotated(doc) else { throw EngineError.failed(L("ページを回転できませんでした")) }
+        return try SafeWrite.replace(file) { tmp in
+            try save(doc, to: tmp)
+            guard let written = PDFDocument(url: tmp), !written.isLocked, rotated(written) else {
+                throw EngineError.failed(L("ページを回転できませんでした"))
+            }
+        }
     }
 
     // MARK: Compress
@@ -298,6 +354,11 @@ enum PDFOps {
 
     static func ocr(_ file: URL, languages: [String], progress: @escaping Engine.Progress) throws -> URL {
         let doc = try open(file)
+        // When every page already has real text there is nothing to recognise: say so instead of writing a full
+        // copy of the file and claiming it was made searchable. Stops at the first page that needs OCR.
+        guard (0..<doc.pageCount).contains(where: { doc.page(at: $0).map(PDFOCR.pageNeedsOCR) ?? false }) else {
+            throw EngineError.failed(L("この PDF はすでに文字を検索できます"))
+        }
         let data = try Formats.searchablePDF(doc, languages: languages, progress: progress)
         let out = OutputNamer.file(for: file, ext: "pdf", tag: L("文字認識"))
         try data.write(to: out, options: .atomic)
@@ -307,9 +368,23 @@ enum PDFOps {
     // MARK: Passwords
 
     static func encrypt(_ file: URL, password: String, owner: String?) throws -> URL {
+        let ownerPassword = owner.flatMap { $0.isEmpty ? nil : $0 } ?? password
+        // PDFKit and Quartz can only write the standard (RC4) security handler, which takes ASCII passwords: with any
+        // other character PDFKit silently writes the file without encryption (CGPDFContext.h).
+        guard PDFPassword.isSupported(password), PDFPassword.isSupported(ownerPassword) else {
+            throw EngineError.failed(PDFPassword.rule)
+        }
         let doc = try open(file)
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
+        defer { try? FileManager.default.removeItem(at: tmp) }   // gone already once moved into place
+        try save(doc, to: tmp, options: [.userPasswordOption: password, .ownerPasswordOption: ownerPassword])
+        // Check the file actually written: it must need a password, refuse to open without one, and open with the
+        // password typed (and the owner password). Otherwise nothing is placed next to the original.
+        guard PDFPassword.isProtected(tmp, password: password, owner: ownerPassword, pageCount: doc.pageCount) else {
+            throw EngineError.failed(L("パスワードを設定できませんでした"))
+        }
         let out = OutputNamer.file(for: file, ext: "pdf", tag: L("保護"))
-        try save(doc, to: out, options: [.userPasswordOption: password, .ownerPasswordOption: owner ?? password])
+        try FileManager.default.moveItem(at: tmp, to: out)
         return out
     }
 
@@ -338,18 +413,23 @@ enum PDFOps {
         }
         let total = doc.pageCount
         for i in 0..<total {
-            guard let page = doc.page(at: i) else { continue }
-            let size = Rasterizer.displaySize(page)
-            var box = CGRect(origin: .zero, size: size)
-            ctx.beginPage(mediaBox: &box)
+            guard let page = doc.page(at: i), let ref = page.pageRef else { throw DocIOError.writeFailed(file.lastPathComponent) }
+            // The new page is the original in its own (unrotated) page space: same media box, and the crop box and
+            // /Rotate are copied back below. So it looks the same, keeps its rotation, and the annotations (stored
+            // in that space) fit again. Redrawing the displayed, rotated page instead lost content on rotated pages.
+            var media = page.bounds(for: .mediaBox)
+            ctx.beginPage(mediaBox: &media)
+            // Content only, at its original page coordinates. The annotations are attached again below as real
+            // annotations; drawing them here as well showed every comment, highlight and field value twice.
             ctx.saveGState()
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
-            page.transform(ctx, for: .cropBox)
-            page.draw(with: .cropBox, to: ctx)
-            NSGraphicsContext.restoreGraphicsState()
+            ctx.drawPDFPage(ref)
             ctx.restoreGState()
 
+            // The stamp is laid out on the page as the reader sees it (rotated crop box, origin bottom-left) and
+            // mapped into page space, so it sits at the bottom centre / across the displayed page.
+            let size = Rasterizer.displaySize(page)
+            ctx.saveGState()
+            ctx.concatenate(page.transform(for: .cropBox).inverted())
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
             switch kind {
@@ -370,19 +450,44 @@ enum PDFOps {
                 ctx.restoreGState()
             }
             NSGraphicsContext.restoreGraphicsState()
+            ctx.restoreGState()
             ctx.endPage()
         }
         ctx.closePDF()
 
-        guard let stamped = PDFDocument(data: data as Data) else { throw DocIOError.writeFailed(file.lastPathComponent) }
-        // Links and comments survive.
-        for i in 0..<min(total, stamped.pageCount) {
-            guard let src = doc.page(at: i), let dst = stamped.page(at: i), src.rotation == 0 else { continue }
-            for a in src.annotations { if let c = a.copy() as? PDFAnnotation { dst.addAnnotation(c) } }
+        guard let stamped = PDFDocument(data: data as Data), stamped.pageCount == total else { throw DocIOError.writeFailed(file.lastPathComponent) }
+        // Written through a fresh document: saving the context's document itself dropped link actions, form field
+        // names and values, and turned strike-outs into highlights.
+        let result = PDFDocument()
+        for i in 0..<total {
+            guard let src = doc.page(at: i), let dst = stamped.page(at: i) else { throw DocIOError.writeFailed(file.lastPathComponent) }
+            // Same boxes and rotation as the original (the PDF context only writes a media box).
+            dst.setBounds(src.bounds(for: .mediaBox), for: .mediaBox)
+            dst.setBounds(src.bounds(for: .cropBox), for: .cropBox)
+            dst.rotation = src.rotation
+            result.insert(dst, at: i)
+        }
+        // A link to a page of the original must go to the same page of the result. The copy has lost its target
+        // page (it pointed at page 1), so the target is taken from the original annotation.
+        func moved(_ d: PDFDestination?) -> PDFDestination? {
+            guard let d, let p = d.page else { return nil }
+            let k = doc.index(for: p)   // NSNotFound for a page of another document
+            guard k >= 0, k < result.pageCount, let target = result.page(at: k) else { return nil }
+            return PDFDestination(page: target, at: d.point)
+        }
+        for i in 0..<total {
+            guard let src = doc.page(at: i), let dst = result.page(at: i) else { continue }
+            // Links and comments survive, on rotated pages too (same page space as the original).
+            for a in src.annotations {
+                guard let c = a.copy() as? PDFAnnotation else { continue }
+                if let d = moved(a.destination) { c.destination = d }
+                if let goTo = a.action as? PDFActionGoTo, let d = moved(goTo.destination) { c.action = PDFActionGoTo(destination: d) }
+                dst.addAnnotation(c)
+            }
         }
         let tag: String = { if case .pageNumbers = kind { return L("ページ番号") }; return L("透かし") }()
         let out = OutputNamer.file(for: file, ext: "pdf", tag: tag)
-        try save(stamped, to: out)
+        try withExtendedLifetime(stamped) { try save(result, to: out) }
         return out
     }
 
@@ -422,6 +527,10 @@ enum ImageExtraction {
 }
 
 enum TextExtraction {
+    /// PDFKit's text of a page or document, with ligature code points spelled out ("ﬃ" -> "ffi") so the copied
+    /// text can be searched.
+    static func plain(_ pdfText: String?) -> String { Ligatures.expand(pdfText ?? "") }
+
     static func text(of files: [URL], languages: [String]) async throws -> String {
         var parts: [String] = []
         for f in files {
@@ -430,7 +539,7 @@ enum TextExtraction {
                 parts.append(try TextRecognizer.recognize(url: f, languages: languages))
             case .pdf:
                 let doc = try PDFOps.open(f)
-                var s = doc.string ?? ""
+                var s = plain(doc.string)
                 if s.trimmingCharacters(in: .whitespacesAndNewlines).count < 10 {
                     // Scanned: recognise.
                     var pages: [String] = []

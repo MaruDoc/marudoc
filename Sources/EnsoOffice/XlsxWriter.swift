@@ -22,8 +22,9 @@ public enum XlsxWriter {
         let cjk = sheets.contains { $0.rows.contains { $0.contains { if case .text(let t) = $0 { return t.unicodeScalars.contains { $0.value >= 0x3000 } }; return false } } }
 
         var strings = SharedStrings()
+        var numberFormats = NumberFormats()
         var sheetXML: [String] = []
-        for s in sheets { sheetXML.append(worksheet(s, strings: &strings, first: sheetXML.isEmpty)) }
+        for s in sheets { sheetXML.append(worksheet(s, strings: &strings, formats: &numberFormats, first: sheetXML.isEmpty)) }
 
         let zip = ZipWriter()
         let sml = "application/vnd.openxmlformats-officedocument.spreadsheetml"
@@ -50,7 +51,7 @@ public enum XlsxWriter {
         try zip.add(path: "xl/_rels/workbook.xml.rels", text: rels.xml)
         for (i, xml) in sheetXML.enumerated() { try zip.add(path: "xl/worksheets/sheet\(i + 1).xml", text: xml) }
         try zip.add(path: "xl/sharedStrings.xml", text: strings.xml)
-        try zip.add(path: "xl/styles.xml", text: styles(font: cjk ? "Yu Gothic" : "Arial", cjk: cjk))
+        try zip.add(path: "xl/styles.xml", text: styles(font: cjk ? "Yu Gothic" : "Arial", cjk: cjk, numberFormats: numberFormats))
         return try zip.finalize()
     }
 
@@ -111,7 +112,7 @@ public enum XlsxWriter {
         return nonEmpty > 0
     }
 
-    static func worksheet(_ sheet: Sheet, strings: inout SharedStrings, first: Bool) -> String {
+    static func worksheet(_ sheet: Sheet, strings: inout SharedStrings, formats: inout NumberFormats, first: Bool) -> String {
         let rows = sheet.rows
         let header = looksLikeHeader(rows)
         let lastRow = rows.lastIndex { $0.contains { $0 != .empty } } ?? -1
@@ -148,6 +149,12 @@ public enum XlsxWriter {
                         s += "<c r=\"\(ref)\"\(bold ? " s=\"1\"" : "")><v>\(numberString(d))</v></c>"
                     case .number(let d):
                         s += textCell(ref, d.isNaN ? "NaN" : (d > 0 ? "∞" : "-∞"), bold: bold, strings: &strings)
+                    case .formatted(let d, let code, _) where d.isFinite:
+                        // The number with its format, so the spreadsheet shows the same text ("12.5%", "¥1,500").
+                        let style = formats.style(for: code)
+                        s += "<c r=\"\(ref)\"\(style > 0 ? " s=\"\(style)\"" : "")><v>\(numberString(d))</v></c>"
+                    case .formatted:
+                        s += textCell(ref, v.displayString, bold: bold, strings: &strings)
                     case .bool(let b):
                         s += "<c r=\"\(ref)\" t=\"b\"\(bold ? " s=\"1\"" : "")><v>\(b ? 1 : 0)</v></c>"
                     case .text(let t):
@@ -189,12 +196,9 @@ public enum XlsxWriter {
         var widths = Array(repeating: 0, count: columns)
         for (r, row) in rows.enumerated() {
             for (c, v) in row.enumerated() where c < columns {
-                let text: String
-                switch v {
-                case .empty: continue
-                case .number(let d): text = numberString(d)
-                default: text = v.displayString
-                }
+                // What the spreadsheet shows (General: at most 15 significant digits).
+                if v == .empty { continue }
+                let text = v.displayString
                 var w = text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).map { TextWidth.columns(String($0)) }.max() ?? 0
                 if header && r == 0 { w = Int((Double(w) * 1.1).rounded(.up)) }
                 widths[c] = max(widths[c], w)
@@ -205,21 +209,49 @@ public enum XlsxWriter {
 
     // MARK: Styles
 
-    static func styles(font: String, cjk: Bool) -> String {
+    static func styles(font: String, cjk: Bool, numberFormats: NumberFormats = NumberFormats()) -> String {
         let fontAttrs = cjk ? "<family val=\"3\"/><charset val=\"128\"/>" : "<family val=\"2\"/>"
         var s = xmlHeader + "<styleSheet xmlns=\"\(NS.x)\">"
+        let custom = numberFormats.ids.filter { $0.id >= NumberFormats.firstCustomID }
+        if !custom.isEmpty {
+            s += "<numFmts count=\"\(custom.count)\">"
+            for f in custom { s += "<numFmt numFmtId=\"\(f.id)\" formatCode=\"\(XMLEsc.attr(f.code))\"/>" }
+            s += "</numFmts>"
+        }
         s += "<fonts count=\"2\"><font><sz val=\"11\"/><name val=\"\(font)\"/>\(fontAttrs)</font><font><b/><sz val=\"11\"/><name val=\"\(font)\"/>\(fontAttrs)</font></fonts>"
         s += "<fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills>"
         s += "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>"
         s += "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>"
-        s += "<cellXfs count=\"4\">"
+        s += "<cellXfs count=\"\(4 + numberFormats.ids.count)\">"
         s += "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>"
         s += "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\"/>"
         s += "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyAlignment=\"1\"><alignment vertical=\"top\" wrapText=\"1\"/></xf>"
         s += "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\" applyAlignment=\"1\"><alignment vertical=\"top\" wrapText=\"1\"/></xf>"
+        // Styles 4… : one per number format used by a formatted number.
+        for f in numberFormats.ids { s += "<xf numFmtId=\"\(f.id)\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyNumberFormat=\"1\"/>" }
         s += "</cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>"
         s += "<dxfs count=\"0\"/><tableStyles count=\"0\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"/>"
         return s + "</styleSheet>"
+    }
+}
+
+/// Number formats used by formatted numbers, each with its numFmtId and cell style (cellXfs index).
+struct NumberFormats {
+    static let firstCustomID = 164
+    /// Built-in formats Excel, Numbers and LibreOffice all know by id.
+    static let builtins: [String: Int] = ["0": 1, "0.00": 2, "#,##0": 3, "#,##0.00": 4, "0%": 9, "0.00%": 10, "0.00E+00": 11]
+    private(set) var ids: [(code: String, id: Int)] = []
+    private var styleByCode: [String: Int] = [:]
+
+    /// The cellXfs index for a format code; 0 (the plain style) for General.
+    mutating func style(for code: String) -> Int {
+        if code.isEmpty || code.lowercased() == "general" { return 0 }
+        if let s = styleByCode[code] { return s }
+        let id = Self.builtins[code] ?? Self.firstCustomID + ids.filter { $0.id >= Self.firstCustomID }.count
+        ids.append((code, id))
+        let style = 4 + ids.count - 1
+        styleByCode[code] = style
+        return style
     }
 }
 

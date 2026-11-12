@@ -184,6 +184,24 @@ enum CharClass {
     static let sentenceEnders: Set<String> = ["。", ".", "．", "!", "！", "?", "？", ":", "：", "」", "』", ")", "）"]
 }
 
+// MARK: - Ligatures
+
+/// Latin ligature code points (U+FB00–FB06: ﬀ ﬁ ﬂ ﬃ ﬄ ﬅ ﬆ) spelled out as their letters. PDFs often map a
+/// ligature glyph to one of these, and left as is "oﬃce" is not found when searching for "office".
+public enum Ligatures {
+    static func isLigature(_ u: Unicode.Scalar) -> Bool { (0xFB00...0xFB06).contains(u.value) }
+
+    public static func expand(_ s: String) -> String {
+        guard s.unicodeScalars.contains(where: isLigature) else { return s }
+        var out = String.UnicodeScalarView()
+        for u in s.unicodeScalars {
+            // NFKC turns each of these into plain letters ("ﬃ" -> "ffi", "ﬅ" -> "st").
+            if isLigature(u) { out.append(contentsOf: String(u).precomposedStringWithCompatibilityMapping.unicodeScalars) } else { out.append(u) }
+        }
+        return String(out)
+    }
+}
+
 // MARK: - Text joining
 
 enum TextJoin {

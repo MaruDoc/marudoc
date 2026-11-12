@@ -53,7 +53,18 @@ enum TextExtractor {
             } else {
                 st = styles.intern(GlyphStyle(fontName: nil, size: (Double(rect.height) / 1.25 * 2).rounded() / 2, bold: false, italic: false, monospaced: false, color: nil))
             }
-            out.append(Glyph(text: ns.substring(with: r), rect: rect, style: st, link: nil, spaceBefore: pendingSpace))
+            let text = ns.substring(with: r)
+            let letters = Ligatures.expand(text)
+            if letters != text, letters.count > 1 {
+                // A ligature code point ("ﬃ"): one glyph per letter, sharing the ligature's box in order.
+                let w = rect.width / CGFloat(letters.count)
+                for (k, ch) in letters.enumerated() {
+                    out.append(Glyph(text: String(ch), rect: CGRect(x: rect.minX + w * CGFloat(k), y: rect.minY, width: w, height: rect.height),
+                                     style: st, link: nil, spaceBefore: k == 0 && pendingSpace))
+                }
+            } else {
+                out.append(Glyph(text: letters, rect: rect, style: st, link: nil, spaceBefore: pendingSpace))
+            }
             pendingSpace = false
         }
         splitLigatures(&out, styles: styles)

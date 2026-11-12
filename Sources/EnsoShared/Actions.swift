@@ -108,11 +108,11 @@ public enum ActionCatalog {
 
     public static func menu(for urls: [URL]) -> [MenuNode] {
         let kinds = Set(urls.map(FileKind.of))
-        if urls.count > 1 { return multiMenu(kinds: kinds, count: urls.count) }
+        if urls.count > 1 { return multiMenu(kinds: kinds, count: urls.count, inPlace: urls.allSatisfy(FileKind.supportsInPlaceEdit)) }
         guard let kind = kinds.first else { return [] }
         switch kind {
         case .pdf: return pdfMenu()
-        case .image: return imageMenu()
+        case .image: return imageMenu(inPlace: urls.allSatisfy(FileKind.supportsInPlaceEdit))
         case .word, .rtf: return wordMenu(kind: kind)
         case .markdown, .text, .html: return textMenu(kind: kind)
         case .spreadsheet, .csv: return sheetMenu(kind: kind)
@@ -176,8 +176,10 @@ public enum ActionCatalog {
         }
     }
 
-    static func imageMenu() -> [MenuNode] {
-        [
+    /// `inPlace` is false for formats whose file cannot be rotated or cleaned in place (WebP, RAW, ...): those
+    /// entries are left out instead of failing every time.
+    static func imageMenu(inPlace: Bool = true) -> [MenuNode] {
+        let nodes: [MenuNode] = [
             MenuNode(id: "g.convert", title: L("変換"), symbol: "arrow.triangle.2.circlepath", action: Act.toPDF, children: imageTargets(includePDF: true)),
             .leaf(Act.editCrop, L("トリミング…"), short: L("トリミング"), symbol: "crop"),
             MenuNode(id: "g.resize", title: L("サイズ変更"), short: L("サイズ"), symbol: "arrow.up.left.and.arrow.down.right", action: Act.imgResize50, children: [
@@ -206,6 +208,12 @@ public enum ActionCatalog {
                 .leaf(Act.copyText, L("テキストをコピー"), short: L("コピー"), symbol: "doc.on.clipboard"),
             ]),
         ]
+        guard !inPlace else { return nodes }
+        return nodes.filter { $0.id != "g.rotate" }.map { node in
+            var n = node
+            n.children = node.children.filter { $0.action != Act.imgStripMetadata }
+            return n
+        }
     }
 
     static func wordMenu(kind: FileKind) -> [MenuNode] {
@@ -267,7 +275,7 @@ public enum ActionCatalog {
         ]
     }
 
-    static func multiMenu(kinds: Set<FileKind>, count: Int) -> [MenuNode] {
+    static func multiMenu(kinds: Set<FileKind>, count: Int, inPlace: Bool = true) -> [MenuNode] {
         var nodes: [MenuNode] = []
         if kinds.isSubset(of: [.pdf, .image]) {
             nodes.append(.leaf(Act.pdfMerge, L("PDF に結合"), short: L("結合"), symbol: "rectangle.stack"))
@@ -299,12 +307,14 @@ public enum ActionCatalog {
                 .leaf(Act.imgCompressStandard, L("標準"), symbol: "circle.lefthalf.filled"),
                 .leaf(Act.imgCompressStrong, L("強め"), symbol: "circle.fill"),
             ]))
-            nodes.append(MenuNode(id: "g.rotate", title: L("まとめて回転"), short: L("回転"), symbol: "rotate.right", action: Act.imgRotateRight, children: [
-                .leaf(Act.imgRotateRight, L("右に回転"), short: L("右回転"), symbol: "rotate.right"),
-                .leaf(Act.imgRotateLeft, L("左に回転"), short: L("左回転"), symbol: "rotate.left"),
-            ]))
+            if inPlace {
+                nodes.append(MenuNode(id: "g.rotate", title: L("まとめて回転"), short: L("回転"), symbol: "rotate.right", action: Act.imgRotateRight, children: [
+                    .leaf(Act.imgRotateRight, L("右に回転"), short: L("右回転"), symbol: "rotate.right"),
+                    .leaf(Act.imgRotateLeft, L("左に回転"), short: L("左回転"), symbol: "rotate.left"),
+                ]))
+            }
             nodes.append(.leaf(Act.imgRemoveBackground, L("まとめて背景を削除"), short: L("背景削除"), symbol: "person.crop.square"))
-            nodes.append(.leaf(Act.imgStripMetadata, L("まとめて位置情報などを削除"), short: L("情報削除"), symbol: "location.slash"))
+            if inPlace { nodes.append(.leaf(Act.imgStripMetadata, L("まとめて位置情報などを削除"), short: L("情報削除"), symbol: "location.slash")) }
         } else if kinds.allSatisfy({ $0.isDocumentLike || $0 == .pdf }) {
             nodes.append(.leaf(Act.toPDF, L("まとめて PDF に変換"), short: "PDF", symbol: "doc.text"))
             nodes.append(.leaf(Act.toMD, L("まとめて Markdown に変換"), short: "Markdown", symbol: "number.square"))

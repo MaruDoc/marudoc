@@ -25,7 +25,7 @@ public enum CSVCodec {
         }
         let d = delim ?? detectDelimiter(body)
         let records = parse(body, delimiter: d)
-        let rows = records.map { $0.map(value) }
+        let rows = records.map { $0.map { value($0, delimiter: d) } }
         return Sheet(name: name, rows: rows)
     }
 
@@ -157,29 +157,67 @@ public enum CSVCodec {
         return records
     }
 
-    static func value(_ f: Field) -> CellValue {
+    /// One CSV field as a cell. Every field keeps its exact text for display, so PDF, Word, Markdown, HTML and copied
+    /// text show the CSV unchanged; it is typed as a number for Excel only when Excel then shows the same text
+    /// (CellValue.typed, which lists the rules). In semicolon-separated files "," is the decimal comma.
+    static func value(_ f: Field, delimiter: Character) -> CellValue {
         if f.text.isEmpty { return .empty }
-        switch CellValue.guess(f.text) {
-        case .number(let d): return .number(d)
-        case .empty: return f.quoted ? .text(f.text) : .empty
-        default: return .text(f.text)
+        if f.text.allSatisfy(\.isWhitespace) { return f.quoted ? .text(f.text) : .empty }
+        return CellValue.typed(f.text, decimalComma: delimiter == ";")
+    }
+
+    /// CSV formula injection (OWASP "CSV Injection"): a text cell that Excel, Numbers or LibreOffice would run as a
+    /// formula gets a leading single quote, so it is shown as text.
+    /// OWASP's rule prefixes every cell starting with = + - @ tab or CR. Its known drawback is that it corrupts
+    /// ordinary data: the quote shows in Numbers, LibreOffice and every non-spreadsheet reader, and a lone "-", a
+    /// negative amount or a phone number like "+81-90-1234-5678" no longer round-trips. MaruDoc therefore prefixes,
+    /// after any leading whitespace (spaces, tabs, CR/LF, which some readers strip):
+    ///   - "=" followed by anything: always a formula;
+    ///   - "+", "-" or "@" followed by something that can do harm in a formula: a function call (a name followed by
+    ///     "("), a DDE call ("|"), or a reference to another sheet or file ("!").
+    /// "-", "-5", "+1.5", "-abc", "@mention" and phone numbers ("+1 (555) 123-4567", "+81-90-1234-5678") are left
+    /// alone: at worst a spreadsheet computes or rejects them, exactly as it would with the original CSV.
+    public static func neutralizingFormula(_ t: String) -> String {
+        let body = t.unicodeScalars.drop { $0 == " " || $0 == "\t" || $0 == "\r" || $0 == "\n" || $0 == "\u{3000}" || $0 == "\u{A0}" }
+        guard let first = body.first else { return t }
+        let rest = body.dropFirst()
+        switch first {
+        case "=":
+            return rest.isEmpty ? t : "'" + t
+        case "+", "-", "@":
+            return looksLikeFormula(rest) ? "'" + t : t
+        default:
+            return t
         }
     }
 
-    /// A text cell that starts with =, +, -, @, tab or CR is read as a formula by Excel and Numbers. It gets a leading
-    /// single quote so it stays text. A cell that is wholly a number ("-5", "+1.5") is left alone.
-    public static func neutralizingFormula(_ t: String) -> String {
-        guard let first = t.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first) else { return t }
-        if case .number = CellValue.guess(t) { return t }
-        return "'" + t
+    /// True when the text after a leading + - @ calls a function (a name that starts with a letter or "_",
+    /// followed by "("), makes a DDE call ("|") or refers to another sheet or file ("!").
+    static func looksLikeFormula(_ s: Substring.UnicodeScalarView) -> Bool {
+        var inName = false, nameStartsWithLetter = false
+        for u in s {
+            switch u {
+            case "|", "!": return true
+            case "(":
+                if inName && nameStartsWithLetter { return true }
+                inName = false
+            case " ", "\t": continue // "SUM (1)": spaces before "(" do not end the name
+            default:
+                let nameChar = u.properties.isAlphabetic || u == "_" || u == "." || ("0"..."9").contains(u)
+                if nameChar && !inName { nameStartsWithLetter = u.properties.isAlphabetic || u == "_" }
+                inName = nameChar
+            }
+        }
+        return false
     }
 
     static func field(_ v: CellValue, delimiter: Character) -> String {
         let s: String
         switch v {
         case .empty: return ""
-        case .number(let d): s = d.isFinite ? XlsxWriter.numberString(d) : v.displayString
         case .text(let t): s = neutralizingFormula(t)
+        // Numbers are written as the spreadsheet shows them, as Excel and LibreOffice save CSV: General numbers
+        // with at most 15 significant digits, formatted numbers in their format ("¥1,500", "12.5%").
         default: s = v.displayString
         }
         let needsQuotes = s.contains(delimiter) || s.contains("\"") || s.contains("\n") || s.contains("\r") ||

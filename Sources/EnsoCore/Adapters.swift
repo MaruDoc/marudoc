@@ -29,7 +29,9 @@ enum Formats {
     static func writePptx(slides: [DocImage], size: CGSize, notes: [String]?, to url: URL) throws {
         try PptxWriter.write(slides: slides, slideSize: size, notes: notes, to: url)
     }
-    static func readPptx(_ url: URL) throws -> DocModel { try PptxReader.read(url) }
+    static func readPptx(_ url: URL, includeNotes: Bool = false) throws -> DocModel {
+        try PptxReader.read(url, includeNotes: includeNotes, notesLabel: L("ノート"))
+    }
     static func pptxImages(_ url: URL) throws -> [(name: String, data: Data)] { try PptxReader.mediaImages(url) }
     static func readCSV(_ url: URL) throws -> Sheet { try CSVCodec.read(url) }
     static func writeCSV(_ sheet: Sheet, to url: URL) throws { try CSVCodec.write(sheet, to: url) }

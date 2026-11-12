@@ -44,29 +44,30 @@
 <main>
   <header><a class="brand" href="/"><img src="/img/icon.png" alt="">MaruDoc</a><a href="/">Home</a></header>
   <h1>Check for updates</h1>
-  <p class="lead">The latest version is <b>1.0.5</b>, released 2026-11-12.</p>
+  <p class="lead">The latest version is <b>1.0.6</b>, released 2026-11-12.</p>
 
   <div class="card ok" id="current" hidden>
     <p><b>You have the latest version.</b></p>
-    <p>MaruDoc 1.0.5 is running on your Mac. There is nothing to do.</p>
+    <p>MaruDoc 1.0.6 is running on your Mac. There is nothing to do.</p>
   </div>
 
   <div class="card" id="newer" hidden>
-    <p><b>MaruDoc 1.0.5 is available.</b> You have <span id="yours"></span>.</p>
+    <p><b>MaruDoc 1.0.6 is available.</b> You have <span id="yours"></span>.</p>
     <p>Download it, open the DMG and drag MaruDoc to Applications, replacing the old one. Your settings stay.</p>
-    <p><a class="btn" href="/MaruDoc.dmg">Download MaruDoc 1.0.5</a></p>
+    <p><a class="btn" href="/MaruDoc.dmg">Download MaruDoc 1.0.6</a></p>
     <p>Installed with Homebrew? Run <code>brew upgrade --cask marudoc</code>.</p>
   </div>
 
   <div class="card" id="plain">
     <p>In MaruDoc, choose <b>Check for Updates…</b> from the menu bar icon to compare with the version on your Mac.</p>
-    <p><a class="btn" href="/MaruDoc.dmg">Download MaruDoc 1.0.5</a></p>
+    <p><a class="btn" href="/MaruDoc.dmg">Download MaruDoc 1.0.6</a></p>
     <p>The Mac App Store version updates through the App Store. Homebrew: <code>brew upgrade --cask marudoc</code>.</p>
   </div>
 
   <h2>What's new</h2>
   <div id="notes">
-      <section class="rel" id="v1.0.5"><h3>1.0.5 <span>2026-11-12</span></h3><ul><li>Fixed the radial menu not appearing on some desktops (Spaces) when you press and hold a file. It happened after any app had been in full screen, and the fix in 1.0.4 did not cover it.</li><li>The small notice that shows a conversion&#x27;s progress and result had the same problem and now appears on every desktop.</li><li>Added Check for Updates (Internet Required) to the menu bar icon. Only when you click it, MaruDoc reads the latest version number from marudoc.app. Converting and editing still never use the network.</li></ul></section>
+      <section class="rel" id="v1.0.6"><h3>1.0.6 <span>2026-11-12</span></h3><ul><li>Remove Location &amp; Metadata now removes GPS, camera data, dates and embedded thumbnails from JPEG, PNG, HEIC, AVIF, TIFF and GIF files, checks the result, and refuses formats it cannot clean. In 1.0.5 some data could remain, for example the location in PNG files.</li><li>Set Password now accepts only letters, digits, symbols and spaces from the basic Latin keyboard, and checks that the PDF is really locked. In 1.0.5 a password with other characters, such as Japanese, produced a PDF with no protection; please set the password again on such files.</li><li>Rotating a protected PDF no longer removes its protection. The file is left unchanged and MaruDoc says why.</li><li>Hidden sheets, rows and columns in Excel files and hidden slides in PowerPoint files are no longer included in conversions or copied text.</li><li>CSV files keep every value exactly as written when converted to PDF, Word, Markdown, HTML or text, and CSV to Excel no longer changes values such as &quot;1,5&quot;, phone numbers and long codes.</li><li>Rotate, Flip and Remove Location &amp; Metadata now keep every frame of an animated GIF, every page of a TIFF and the HDR data of iPhone photos, and never change a file&#x27;s format.</li><li>Rotated pages, common in scans, now come out the right way up in PDF to image, PDF to PowerPoint, Copy Text, page numbers and watermarks. Page numbers and watermarks keep comments, links and form values.</li><li>PowerPoint conversions keep cropped and rotated pictures, pen drawings and table column widths, show light text in a readable colour, add speaker notes to Word, Markdown and text, and no longer add bullets that are not on the slide.</li><li>Numbers from Excel files appear as Excel shows them, including currency, percent and dates. A formula with no saved result shows the formula.</li><li>English text recognition no longer mixes in full-width punctuation or wrong letters. Japanese recognition is unchanged.</li><li>Combining iPhone photos into one PDF makes much smaller files, HEIC to TIFF is smaller, text recognition on a PDF that is already searchable no longer writes a copy, and damaged images give an error.</li></ul></section>
+      <section class="rel" id="v1.0.5"><h3>1.0.5 <span>2026-11-12</span></h3><ul><li>Fixed the radial menu not appearing on some desktops (Spaces) when you press and hold a file. It happened after any app had been in full screen, and the fix in 1.0.4 did not cover it.</li><li>Two small notices, from the editor and the placement hint, had the same problem and now appear on every desktop.</li><li>Added Check for Updates (Internet Required) to the menu bar icon. Only when you click it, MaruDoc reads the latest version number from marudoc.app. Converting and editing still never use the network.</li></ul></section>
       <section class="rel" id="v1.0.4"><h3>1.0.4 <span>2026-11-11</span></h3><ul><li>Fixed the radial menu sometimes not appearing when you press and hold a file in Finder or on the desktop. The menu now scales in without fading.</li></ul></section>
       <section class="rel" id="v1.0.3"><h3>1.0.3 <span>2026-10-20</span></h3><ul><li>In the radial menu, the centre now reads &quot;Cancel&quot; when you move the pointer back to it. Releasing or clicking there closes the menu without running anything.</li></ul></section>
       <section class="rel" id="v1.0.2"><h3>1.0.2 <span>2026-10-20</span></h3><ul><li>Pressing and holding a file near a screen edge no longer moves the pointer. The menu shifts to fit on screen and stays open after you let go, so you click an item to choose it.</li></ul></section>
@@ -77,7 +78,7 @@
 </main>
 <script>
 (function () {
-  var LATEST = "1.0.5";
+  var LATEST = "1.0.6";
   var v = new URLSearchParams(location.search).get("v");
   if (!v || !/^\d+(\.\d+){0,3}/.test(v)) { return; }
   v = v.match(/^\d+(\.\d+){0,3}/)[0];
