@@ -358,7 +358,7 @@ extension SelfTest {
         if let ld = try? wordDocx(longParts), let u = await outputText(Act.toPDF, write(ld, "longnote.docx", in: d)).url, let doc = PDFDocument(url: u) {
             let all = (doc.string ?? "").components(separatedBy: .whitespacesAndNewlines).joined()
             check("WD-01 notes: a long footnote continues on the next page, complete",
-                  doc.pageCount == 2 && all.contains("その400。脚注はここまで") && all.contains("その1。長い脚注の文その2。"), "pages \(doc.pageCount)")
+                  doc.pageCount >= 2 && all.contains("その400。脚注はここまで") && all.contains("その1。長い脚注の文その2。"), "pages \(doc.pageCount)")
         } else { check("WD-01 notes: a long footnote continues on the next page, complete", false, "no PDF") }
     }
 

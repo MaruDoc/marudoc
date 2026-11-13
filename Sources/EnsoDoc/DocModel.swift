@@ -114,6 +114,8 @@ public struct DocParagraph: Hashable, Sendable {
     public var alignment: DocAlignment
     /// Left indent in points (0 = none).
     public var indent: Double
+    /// Formatting from a source with its own page layout (Word); only the PDF renderer uses it. nil elsewhere.
+    public var format: DocParagraphFormat? = nil
 
     public init(_ runs: [DocRun], alignment: DocAlignment = .left, indent: Double = 0) {
         self.runs = runs; self.alignment = alignment; self.indent = indent
@@ -165,6 +167,10 @@ public struct DocImage: Hashable, Sendable {
     public var displayWidth: Double
     public var displayHeight: Double
     public var altText: String?
+    /// The same picture as vector PDF (Word's EMF pictures, which `data` carries as PNG); only the PDF renderer uses it.
+    public var vectorPDF: Data? = nil
+    /// Where the picture sits in its paragraph's line (Word's inline pictures); only the PDF renderer uses it.
+    public var placement: DocImagePlacement? = nil
 
     public init(data: Data, format: DocImageFormat, pixelWidth: Int, pixelHeight: Int,
                 displayWidth: Double? = nil, displayHeight: Double? = nil, altText: String? = nil) {
@@ -289,6 +295,9 @@ public struct DocModel: Sendable {
     public var bodyEastAsianFontName: String?
     /// Footnotes and endnotes, in the order their marks appear. Marks are runs with `noteID`.
     public var notes: [DocNote]
+    /// Sections, headers, footers and paragraph formatting of a source with its own page layout (Word). When set, the
+    /// PDF renderer lays the pages out like the source; nil for everything else.
+    public var pageLayout: DocPageLayout? = nil
 
     public init(title: String? = nil, blocks: [DocBlock] = [], pageSize: CGSize? = nil,
                 bodyFontSize: Double = 11, bodyFontName: String? = nil, notes: [DocNote] = [], bodyEastAsianFontName: String? = nil) {

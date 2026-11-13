@@ -44,28 +44,29 @@
 <main>
   <header><a class="brand" href="/"><img src="/img/icon.png" alt="">MaruDoc</a><a href="/">Home</a></header>
   <h1>Check for updates</h1>
-  <p class="lead">The latest version is <b>1.0.8</b>, released 2026-11-13.</p>
+  <p class="lead">The latest version is <b>1.0.9</b>, released 2026-11-13.</p>
 
   <div class="card ok" id="current" hidden>
     <p><b>You have the latest version.</b></p>
-    <p>MaruDoc 1.0.8 is running on your Mac. There is nothing to do.</p>
+    <p>MaruDoc 1.0.9 is running on your Mac. There is nothing to do.</p>
   </div>
 
   <div class="card" id="newer" hidden>
-    <p><b>MaruDoc 1.0.8 is available.</b> You have <span id="yours"></span>.</p>
+    <p><b>MaruDoc 1.0.9 is available.</b> You have <span id="yours"></span>.</p>
     <p>Download it, open the DMG and drag MaruDoc to Applications, replacing the old one. Your settings stay.</p>
-    <p><a class="btn" href="/MaruDoc.dmg">Download MaruDoc 1.0.8</a></p>
+    <p><a class="btn" href="/MaruDoc.dmg">Download MaruDoc 1.0.9</a></p>
     <p>Installed with Homebrew? Run <code>brew upgrade --cask marudoc</code>.</p>
   </div>
 
   <div class="card" id="plain">
     <p>In MaruDoc, choose <b>Check for Updates…</b> from the menu bar icon to compare with the version on your Mac.</p>
-    <p><a class="btn" href="/MaruDoc.dmg">Download MaruDoc 1.0.8</a></p>
+    <p><a class="btn" href="/MaruDoc.dmg">Download MaruDoc 1.0.9</a></p>
     <p>The Mac App Store version updates through the App Store. Homebrew: <code>brew upgrade --cask marudoc</code>.</p>
   </div>
 
   <h2>What's new</h2>
   <div id="notes">
+      <section class="rel" id="v1.0.9"><h3>1.0.9 <span>2026-11-13</span></h3><ul><li>Word to PDF now has headers, footers and page numbers, including &quot;Page 1 / 3&quot; and a different first page.</li><li>Landscape pages in a Word document come out landscape, and each section keeps its own paper size and margins.</li><li>Headings, line spacing, paragraph spacing, indents and margins follow the Word document. In 1.0.8 headings were enlarged and the spacing was fixed, which added pages.</li><li>Layouts built with tab stops, such as arrow diagrams and tables of contents with dot leaders, stay aligned.</li><li>EMF pictures in Word documents, such as organisation charts, are drawn instead of being left out, and pictures placed side by side stay side by side.</li><li>Boxed paragraphs and text boxes keep their frames.</li><li>Text set in MS Gothic no longer comes out in a hairline weight that looked grey, in PDFs and in the Word editor.</li><li>Dashes and similar characters (—, –, −, 〜) copy correctly from PDFs made from Word, Markdown, HTML and text files.</li><li>Very large text files convert to PDF in seconds instead of minutes.</li></ul></section>
       <section class="rel" id="v1.0.8"><h3>1.0.8 <span>2026-11-13</span></h3><ul><li>PowerPoint to PDF now draws the slides. Each slide is one page at the slide&#x27;s own size, with its background, shapes, pictures, tables, charts and SmartArt, and the text can still be selected and searched. In 1.0.7 the text and pictures were poured onto A4 pages.</li><li>Excel to PDF now prints the sheet as Excel would: column widths, merged cells, fonts, fills, borders, number formats, charts and pictures, the file&#x27;s own print settings, and a header row repeated on each page. A wide sheet is turned sideways or shrunk to fit instead of being cut into narrow columns.</li><li>CSV to PDF prints a plain grid with columns sized to their contents and numbers aligned right. A 50,000-row file that took over two minutes now takes a few seconds.</li><li>Excel to Word keeps the sheet&#x27;s column proportions, merged cells, bold, fills and number alignment, and a title above the table stays a title.</li><li>PowerPoint to image gives one image per slide.</li><li>Excel fraction formats such as 2 3/4 and Japanese era dates such as 令和1年5月1日 are shown as Excel shows them.</li><li>The PowerPoint menu item is now &quot;Convert to PDF&quot;.</li></ul></section>
       <section class="rel" id="v1.0.7"><h3>1.0.7 <span>2026-11-12</span></h3><ul><li>Footnotes and endnotes in Word documents are now kept in every conversion. PDFs put footnotes at the bottom of the page, and Word output has real footnotes.</li><li>Text with ruby (furigana) no longer loses its base characters. HTML and Word keep the ruby; other formats show the reading in parentheses.</li><li>Superscript and subscript are kept, for example 10⁵ and H₂O, from Word and HTML.</li><li>Equations in Word documents are written as one-line text instead of disappearing, and symbol characters such as check marks are converted to the matching characters.</li><li>List markers such as (1), ①, I., a) and 第1条 are kept instead of becoming 1. 2. 3.</li><li>Pictures inside table cells stay in their cells, merged cells stay merged, and an HTML table with merged rows no longer shifts the next row.</li><li>Every page break in a Word document starts a new page in the PDF, and documents set in MS Mincho or Century print in a Mincho typeface.</li><li>Markdown handles line breaks in table cells, inline HTML, HTML blocks, task lists, footnotes and column alignment, and no longer prints front matter as text.</li><li>An HTML page with an embedded frame no longer loses the text after it.</li><li>Text files in EUC-JP, UTF-16 without a byte-order mark and ISO-2022-JP are recognised, also in the built-in text editor.</li><li>Links in PDFs are blue and underlined, and quotes stay readable when the Mac is in Dark Mode.</li><li>An Excel file with nothing visible to convert now says so instead of writing an empty file.</li></ul></section>
       <section class="rel" id="v1.0.6"><h3>1.0.6 <span>2026-11-12</span></h3><ul><li>Remove Location &amp; Metadata now removes GPS, camera data, dates and embedded thumbnails from JPEG, PNG, HEIC, AVIF, TIFF and GIF files, checks the result, and refuses formats it cannot clean. In 1.0.5 some data could remain, for example the location in PNG files.</li><li>Set Password now accepts only letters, digits, symbols and spaces from the basic Latin keyboard, and checks that the PDF is really locked. In 1.0.5 a password with other characters, such as Japanese, produced a PDF with no protection; please set the password again on such files.</li><li>Rotating a protected PDF no longer removes its protection. The file is left unchanged and MaruDoc says why.</li><li>Hidden sheets, rows and columns in Excel files and hidden slides in PowerPoint files are no longer included in conversions or copied text.</li><li>CSV files keep every value exactly as written when converted to PDF, Word, Markdown, HTML or text, and CSV to Excel no longer changes values such as &quot;1,5&quot;, phone numbers and long codes.</li><li>Rotate, Flip and Remove Location &amp; Metadata now keep every frame of an animated GIF, every page of a TIFF and the HDR data of iPhone photos, and never change a file&#x27;s format.</li><li>Rotated pages, common in scans, now come out the right way up in PDF to image, PDF to PowerPoint, Copy Text, page numbers and watermarks. Page numbers and watermarks keep comments, links and form values.</li><li>PowerPoint conversions keep cropped and rotated pictures, pen drawings and table column widths, show light text in a readable colour, add speaker notes to Word, Markdown and text, and no longer add bullets that are not on the slide.</li><li>Numbers from Excel files appear as Excel shows them, including currency, percent and dates. A formula with no saved result shows the formula.</li><li>English text recognition no longer mixes in full-width punctuation or wrong letters. Japanese recognition is unchanged.</li><li>Combining iPhone photos into one PDF makes much smaller files, HEIC to TIFF is smaller, text recognition on a PDF that is already searchable no longer writes a copy, and damaged images give an error.</li></ul></section>
@@ -80,7 +81,7 @@
 </main>
 <script>
 (function () {
-  var LATEST = "1.0.8";
+  var LATEST = "1.0.9";
   var v = new URLSearchParams(location.search).get("v");
   if (!v || !/^\d+(\.\d+){0,3}/.test(v)) { return; }
   v = v.match(/^\d+(\.\d+){0,3}/)[0];

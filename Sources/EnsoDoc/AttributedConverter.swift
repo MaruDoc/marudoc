@@ -68,10 +68,13 @@ public enum AttributedConverter {
     }
 
     static func installedFont(_ name: String, size: CGFloat) -> NSFont? {
-        if let f = NSFont(name: name, size: size) { return f }
+        // Family names go through the family lookup first: NSFont(name:) given a family name may return any member,
+        // and for "Hiragino Sans" (where ＭＳ ゴシック and the other Gothic faces map) it returns W0, a hairline face
+        // that printed body text and headings as faint grey.
         if let f = familyFont(name, size: size) { return f }
+        if let f = NSFont(name: name, size: size) { return f }
         let k = fontKey(name)
-        if let mac = windowsFonts[k] { return NSFont(name: mac, size: size) ?? familyFont(mac, size: size) }
+        if let mac = windowsFonts[k] { return familyFont(mac, size: size) ?? NSFont(name: mac, size: size) }
         if k.contains("明朝") || k.contains("mincho") { return familyFont("Hiragino Mincho ProN", size: size) }
         if k.contains("ゴシック") || k.contains("gothic") || k.contains("ｺﾞｼｯｸ") { return familyFont("Hiragino Sans", size: size) }
         return nil
@@ -144,6 +147,8 @@ public enum AttributedConverter {
     // MARK: DocModel -> NSAttributedString
 
     public static func attributedString(from model: DocModel, style: Style = Style()) -> NSAttributedString {
+        // Source layout changes the column size per section (below); everything else keeps the caller's.
+        var style = style
         let out = NSMutableAttributedString()
         let body = style.bodySize
         let base = baseFont(size: body, name: style.fontName ?? model.bodyFontName, eastAsian: style.fontName == nil ? model.bodyEastAsianFontName : nil)
@@ -244,7 +249,7 @@ public enum AttributedConverter {
         }
 
         func attachment(_ img: DocImage, maxWidth: CGFloat) -> NSTextAttachment? {
-            guard let image = NSImage(data: img.data) else { return nil }
+            guard let image = NSImage(data: (style.paged ? img.vectorPDF : nil) ?? img.data) else { return nil }
             var w = CGFloat(img.displayWidth), h = CGFloat(img.displayHeight)
             let k = min(1, max(maxWidth, 8) / max(w, 1), style.contentHeight * 0.9 / max(h, 1))
             w *= k; h *= k
@@ -254,8 +259,105 @@ public enum AttributedConverter {
             return att
         }
 
-        for block in model.blocks {
+        // Source layout (PDF of a Word document): paragraphs keep the document's spacing, line spacing and indents
+        // (AttributedConverter+Source.swift). Between two paragraphs Word leaves the larger of the space after the
+        // first and the space before the second.
+        let source: DocPageLayout? = style.paged ? model.pageLayout : nil
+        var currentSection = 0
+        var prevAfter: CGFloat = 0
+        var prevContextual: (style: String, range: NSRange, ps: NSMutableParagraphStyle)?
+
+        func naturalLineHeight(_ runs: [DocRun], size: CGFloat) -> CGFloat {
+            var h: CGFloat = 0
+            for r in runs where r.image == nil && !r.text.isEmpty {
+                let rs = CGFloat(r.fontSize ?? Double(size))
+                let eastAsian = r.text.unicodeScalars.contains { $0.value >= 0x2E80 }
+                let requested = r.fontName ?? (eastAsian ? (model.bodyEastAsianFontName ?? model.bodyFontName) : model.bodyFontName)
+                let drawn = r.fontName.map { baseFont(size: rs, name: $0) } ?? base.withSize(rs)
+                h = max(h, wordLineHeight(requested: requested, size: rs, drawn: drawn))
+            }
+            if h == 0 {
+                h = wordLineHeight(requested: model.bodyEastAsianFontName ?? model.bodyFontName, size: size, drawn: base.withSize(size))
+            }
+            return h
+        }
+
+        func sourceStyle(_ f: DocParagraphFormat, alignment: DocAlignment, runs: [DocRun], size: CGFloat) -> NSMutableParagraphStyle {
+            let pitch = source.flatMap { s in currentSection < s.sections.count ? s.sections[currentSection].linePitch : nil }
+            var before = max(0, CGFloat(f.spaceBefore) - prevAfter)
+            // Contextual spacing: no space between neighbours of the same style.
+            if let c = f.contextualStyle, let prev = prevContextual, prev.style == c {
+                let m = prev.ps.mutableCopy() as! NSMutableParagraphStyle
+                m.paragraphSpacing = 0
+                out.addAttribute(.paragraphStyle, value: m, range: prev.range)
+                before = 0
+            }
+            return sourceParagraphStyle(f, alignment: alignment, natural: naturalLineHeight(runs, size: size), pitch: pitch.map { CGFloat($0) },
+                                        defaultTab: CGFloat(source?.defaultTabStop ?? 36), before: before)
+        }
+
+        /// Appends a paragraph laid out by its source format, after the blank lines that preceded it in the source.
+        func appendSource(_ f: DocParagraphFormat, alignment: DocAlignment, runs: [DocRun], size: CGFloat, headerLevel: Int = 0) {
+            for e in f.emptyBefore {
+                let s = CGFloat(e.markFontSize ?? Double(size))
+                let ps = sourceStyle(e, alignment: .left, runs: [], size: s)
+                append(runs: [], size: s, paragraph: ps)
+                prevAfter = CGFloat(e.spaceAfter); prevContextual = nil
+            }
+            let ps = sourceStyle(f, alignment: alignment, runs: runs, size: size)
+            if headerLevel > 0 { ps.headerLevel = headerLevel }
+            var extra: [NSAttributedString.Key: Any] = [:]
+            if f.keepWithNext { extra[.ensoKeepNext] = true }
+            if let b = f.borders { extra[.ensoBorders] = b }
+            if f.tabStops.contains(where: { $0.leader != .none }) {
+                // All stops (with the hanging indent's), so the renderer can tell which one each tab reached.
+                var stops = f.tabStops
+                if f.firstLineIndent < 0 { stops.append(DocTabStop(position: max(0, f.leftIndent))) }
+                extra[.ensoTabLeaders] = stops.sorted { $0.position < $1.position }
+            }
+            let start = out.length
+            append(runs: runs, size: size, paragraph: ps, extra: extra)
+            prevAfter = ps.paragraphSpacing
+            prevContextual = f.contextualStyle.map { (style: $0, range: NSRange(location: start, length: out.length - start), ps: ps) }
+        }
+
+        var skipThrough = -1
+        for (blockIndex, block) in model.blocks.enumerated() {
+            // Pictures already set on the line of the picture before them.
+            if blockIndex <= skipThrough { continue }
+            let blockStart = out.length
+            if let source {
+                currentSection = source.sectionIndex(forBlock: blockIndex)
+                // Pictures and tables fit the column of their own section (a landscape page is wider).
+                let sec = source.sections[currentSection]
+                style.contentWidth = CGFloat(sec.contentWidth)
+                style.contentHeight = CGFloat(max(sec.height - sec.top - sec.bottom, 36))
+            }
+            defer {
+                if source != nil, out.length > blockStart {
+                    out.addAttribute(.ensoSection, value: currentSection, range: NSRange(location: blockStart, length: out.length - blockStart))
+                }
+            }
+            if source != nil {
+                // Spacing collapses only between paragraphs; anything else (table, picture) ends the run.
+                switch block {
+                case .heading, .paragraph, .listItem, .quote: break
+                default: prevAfter = 0; prevContextual = nil
+                }
+            }
             switch block {
+            case .heading(let level, let p) where source != nil && p.format != nil:
+                let f = p.format!
+                appendSource(f, alignment: p.alignment, runs: f.styledRuns ?? p.runs, size: body, headerLevel: level)
+            case .paragraph(let p) where source != nil && p.format != nil:
+                appendSource(p.format!, alignment: p.alignment, runs: p.runs, size: body)
+            case .quote(let p) where source != nil && p.format != nil:
+                appendSource(p.format!, alignment: p.alignment, runs: p.runs, size: body)
+            case .listItem(let li) where source != nil && li.paragraph.format != nil:
+                // Word's marker, then a tab to the hanging indent.
+                let first = li.paragraph.runs.first
+                let marker = DocRun(li.markerText(bullet: "•") + "\t", fontSize: first?.fontSize, fontName: first?.fontName)
+                appendSource(li.paragraph.format!, alignment: li.paragraph.alignment, runs: [marker] + li.paragraph.runs, size: body)
             case .heading(let level, let p):
                 let scale: CGFloat = [1.9, 1.5, 1.25, 1.1, 1.0, 1.0][max(0, min(5, level - 1))]
                 let size = (body * scale).rounded()
@@ -293,6 +395,15 @@ public enum AttributedConverter {
                     append(runs: [DocRun(line.isEmpty ? " " : line, code: true)], size: body, paragraph: p)
                 }
             case .table(let t):
+                // Blank lines that stood before the table in the source (kept on its first cell).
+                if source != nil, let blanks = t.rows.first?.first?.paragraphs.first?.format?.emptyBefore {
+                    for e in blanks {
+                        let s = CGFloat(e.markFontSize ?? Double(body))
+                        append(runs: [], size: s, paragraph: sourceStyle(e, alignment: .left, runs: [], size: s))
+                        prevAfter = CGFloat(e.spaceAfter)
+                    }
+                    prevAfter = 0
+                }
                 tableCounter += 1
                 let cols = max(1, t.columnCount)
                 let table = NSTextTable()
@@ -322,16 +433,27 @@ public enum AttributedConverter {
                         block.setWidth(0.5, type: .absoluteValueType, for: .border)
                         block.setBorderColor(NSColor(white: 0.62, alpha: 1))
                         block.setWidth(4, type: .absoluteValueType, for: .padding)
+                        // Word's cells have no top and bottom margin; a hairline keeps the text off the border.
+                        if source != nil {
+                            block.setWidth(1, type: .absoluteValueType, for: .padding, edge: .minY)
+                            block.setWidth(1, type: .absoluteValueType, for: .padding, edge: .maxY)
+                        }
                         setWidth(block, col, span)
                         if r < t.headerRows { block.backgroundColor = NSColor(white: 0.93, alpha: 1) }
                         // The cell's alignment (GFM ":---:", docx w:jc) is its first paragraph's.
-                        let ps = paraStyle(cell.paragraphs.first?.alignment ?? .left, after: 0, lineHeight: 1.2)
-                        ps.textBlocks = [block]
+                        var ps = paraStyle(cell.paragraphs.first?.alignment ?? .left, after: 0, lineHeight: 1.2)
                         let runs = cell.paragraphs.enumerated().flatMap { (i, p) in (i > 0 ? [DocRun("\u{2028}")] : []) + p.runs }
+                        // Source layout: the first paragraph's line spacing and indents, at the document's sizes.
+                        if source != nil, let firstPara = cell.paragraphs.first, let f = firstPara.format {
+                            ps = sourceParagraphStyle(f, alignment: firstPara.alignment, natural: naturalLineHeight(runs, size: body), pitch: nil,
+                                                      defaultTab: CGFloat(source?.defaultTabStop ?? 36), before: 0, inCell: true)
+                        }
+                        ps.textBlocks = [block]
                         // Pictures in a cell fit the cell's share of the width.
                         let share = widths.map { w in CGFloat(w[min(col, cols - 1)..<min(col + span, cols)].reduce(0, +)) / 100 }
                             ?? CGFloat(span) / CGFloat(cols)
-                        append(runs: runs.isEmpty ? [DocRun("")] : runs, size: body * 0.95, forceBold: r < t.headerRows, paragraph: ps,
+                        append(runs: runs.isEmpty ? [DocRun("")] : runs, size: source != nil ? body : body * 0.95,
+                               forceBold: r < t.headerRows && source == nil, paragraph: ps,
                                maxImageWidth: max(style.contentWidth * share - 10, 8))
                         col += span
                     }
@@ -343,6 +465,10 @@ public enum AttributedConverter {
                         if widths != nil {
                             // Same padding as real cells, or the fixed widths would not line up with the rows above.
                             block.setWidth(4, type: .absoluteValueType, for: .padding)
+                            if source != nil {
+                                block.setWidth(1, type: .absoluteValueType, for: .padding, edge: .minY)
+                                block.setWidth(1, type: .absoluteValueType, for: .padding, edge: .maxY)
+                            }
                             setWidth(block, col, 1)
                         }
                         let ps = paraStyle(after: 0); ps.textBlocks = [block]
@@ -350,19 +476,37 @@ public enum AttributedConverter {
                         col += 1
                     }
                 }
-                // Space after the table.
-                append(runs: [], size: body * 0.6, paragraph: paraStyle(after: 0))
+                // Space after the table; Word has none (a hairline paragraph still ends the table).
+                if source != nil {
+                    let ps = paraStyle(after: 0); ps.maximumLineHeight = 1; ps.minimumLineHeight = 1
+                    append(runs: [], size: 1, paragraph: ps)
+                } else {
+                    append(runs: [], size: body * 0.6, paragraph: paraStyle(after: 0))
+                }
             case .image(let img):
-                guard let image = NSImage(data: img.data) else { continue }
-                var w = CGFloat(img.displayWidth), h = CGFloat(img.displayHeight)
-                let maxW = style.contentWidth, maxH = style.contentHeight * 0.92
-                let k = min(1, maxW / max(w, 1), maxH / max(h, 1))
-                w *= k; h *= k
-                let att = NSTextAttachment()
-                att.image = image
-                att.bounds = CGRect(x: 0, y: 0, width: w, height: h)
-                let ps = paraStyle(.center, before: body * 0.4, after: body * 0.8, lineHeight: 1)
-                let s = NSMutableAttributedString(attachment: att)
+                // Source layout: the inline pictures of one paragraph share a line where they fit (TextKit wraps the
+                // rest, as Word does), aligned like their paragraph. Metafiles are drawn from their vector form.
+                var group = [img]
+                if source != nil, let g = img.placement?.group {
+                    var j = blockIndex + 1
+                    while j < model.blocks.count, case .image(let next) = model.blocks[j], next.placement?.group == g { group.append(next); j += 1 }
+                    skipThrough = j - 1
+                }
+                let s = NSMutableAttributedString()
+                for pic in group {
+                    guard let image = NSImage(data: (style.paged ? pic.vectorPDF : nil) ?? pic.data) else { continue }
+                    var w = CGFloat(pic.displayWidth), h = CGFloat(pic.displayHeight)
+                    // A page-high picture leaves room in source layout for the caption or source line set after it.
+                    let maxW = style.contentWidth, maxH = style.contentHeight * (source != nil ? 0.85 : 0.92)
+                    let k = min(1, maxW / max(w, 1), maxH / max(h, 1))
+                    w *= k; h *= k
+                    let att = NSTextAttachment()
+                    att.image = image
+                    att.bounds = CGRect(x: 0, y: 0, width: w, height: h)
+                    s.append(NSAttributedString(attachment: att))
+                }
+                if s.length == 0 { continue }
+                let ps = paraStyle(source != nil ? (img.placement?.alignment ?? .center) : .center, before: body * 0.4, after: body * 0.8, lineHeight: 1)
                 s.addAttributes([.paragraphStyle: ps], range: NSRange(location: 0, length: s.length))
                 let start = out.length
                 out.append(s)

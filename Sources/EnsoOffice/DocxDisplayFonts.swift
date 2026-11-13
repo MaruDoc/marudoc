@@ -53,6 +53,11 @@ enum DocxDisplayFonts {
     }
 
     private static func family(_ name: String, size: CGFloat) -> NSFont? {
+        // A family name goes through the family lookup first: NSFont(name:) given "Hiragino Sans" (where ＭＳ ゴシック
+        // and the other Gothic faces map) returns W0, a hairline face that reads as faint grey.
+        // The descriptor lookup gives the family's regular face (W3), the same one the PDF output uses.
+        if NSFontManager.shared.availableMembers(ofFontFamily: name)?.isEmpty == false,
+           let f = NSFont(descriptor: NSFontDescriptor(fontAttributes: [.family: name]), size: size) { return f }
         if let f = NSFont(name: name, size: size) { return f }
         guard NSFontManager.shared.availableMembers(ofFontFamily: name)?.isEmpty == false else { return nil }
         return NSFont(descriptor: NSFontDescriptor(fontAttributes: [.family: name]), size: size)

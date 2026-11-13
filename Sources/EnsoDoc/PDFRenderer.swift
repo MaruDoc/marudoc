@@ -17,6 +17,10 @@ public enum PDFRenderer {
     }
 
     public static func pdfData(from model: DocModel, setup: PageSetup? = nil, pageNumbers: Bool = false) -> Data {
+        // A source with its own page layout (Word) is paginated section by section (SourcePDFRenderer.swift).
+        if setup == nil, let layout = model.pageLayout, !layout.sections.isEmpty {
+            return sourcePDF(model, layout: layout, pageNumbers: pageNumbers)
+        }
         var s = setup ?? PageSetup()
         if setup == nil, let size = model.pageSize, size.width > 100, size.height > 100 { s.size = size }
         let style = AttributedConverter.Style(bodySize: CGFloat(model.bodyFontSize), contentWidth: s.contentSize.width,
@@ -26,6 +30,8 @@ public enum PDFRenderer {
     }
 
     public static func pdfData(from attr: NSAttributedString, setup: PageSetup = PageSetup(), title: String? = nil, pageNumbers: Bool = false) -> Data {
+        // Characters whose Hiragino / Yu glyph would copy back as another character get a safe font.
+        let attr = TextLayerFonts.fixed(attr)
         let data = NSMutableData()
         var mediaBox = CGRect(origin: .zero, size: setup.size)
         var info: [CFString: Any] = [kCGPDFContextCreator: "MaruDoc"]
@@ -45,13 +51,27 @@ public enum PDFRenderer {
         var carried = NSAttributedString()
 
         for segment in segments {
-            let storage = NSTextStorage(attributedString: segment)
+          // Long text is laid out in pieces (see `chunks`); a piece continues on the page where the previous one ended.
+          var room: (offset: CGFloat, height: CGFloat)?
+          let pieces = hasFootnotes ? [segment] : chunks(segment)
+          for (pieceIndex, piece) in pieces.enumerated() {
+            let storage = NSTextStorage(attributedString: piece)
             let lm = NSLayoutManager()
             lm.usesFontLeading = true
             storage.addLayoutManager(lm)
             storages.append(storage)
             var guardCount = 0
-            while true {
+            var done = false
+            if let r = room, var last = pages.popLast() {
+                let tc = NSTextContainer(size: CGSize(width: setup.contentSize.width, height: r.height))
+                tc.lineFragmentPadding = 0
+                lm.addTextContainer(tc)
+                last.more.append((lm, tc, r.offset))
+                pages.append(last)
+                let range = lm.glyphRange(for: tc)
+                done = NSMaxRange(range) >= lm.numberOfGlyphs
+            }
+            while !done {
                 let tc = NSTextContainer(size: setup.contentSize)
                 tc.lineFragmentPadding = 0
                 lm.addTextContainer(tc)
@@ -64,6 +84,17 @@ public enum PDFRenderer {
                 // An element taller than the page can make no progress; stop instead of looping forever.
                 if range.length == 0 { break }
             }
+            // Room left on the last page for the next piece.
+            room = nil
+            if pieceIndex + 1 < pieces.count, let last = pages.last {
+                let part = last.more.last.map { ($0.lm, $0.tc, $0.dy) } ?? (last.lm, last.tc, 0)
+                if let plm = part.0, let ptc = part.1, plm === lm, case let g = plm.glyphRange(for: ptc), g.length > 0 {
+                    // The last line's fragment (with its paragraph spacing), not the empty line after the final newline.
+                    let used = part.2 + plm.lineFragmentRect(forGlyphAt: NSMaxRange(g) - 1, effectiveRange: nil).maxY
+                    if setup.contentSize.height - used > 1 { room = (used, setup.contentSize.height - used) }
+                }
+            }
+          }
         }
         // Notes still waiting after the last page get pages of their own.
         var noteGuard = 0
@@ -91,6 +122,13 @@ public enum PDFRenderer {
                     lm.drawBackground(forGlyphRange: range, at: origin)
                     lm.drawGlyphs(forGlyphRange: range, at: origin)
                 }
+            }
+            for part in page.more {
+                let range = part.lm.glyphRange(for: part.tc)
+                guard range.length > 0 else { continue }
+                let o = CGPoint(x: origin.x, y: origin.y + part.dy)
+                part.lm.drawBackground(forGlyphRange: range, at: o)
+                part.lm.drawGlyphs(forGlyphRange: range, at: o)
             }
             if let notes = page.notes {
                 // Bottom-aligned in the text area, under a short rule, like Word's footnote separator; a page holding
@@ -131,6 +169,8 @@ public enum PDFRenderer {
         var lm: NSLayoutManager?
         var tc: NSTextContainer?
         var notes: Notes?
+        /// Further text on the same page from the next piece of a long text (`chunks`), `dy` below the top.
+        var more: [(lm: NSLayoutManager, tc: NSTextContainer, dy: CGFloat)] = []
     }
 
     /// Footnote text laid out for one page: draw `glyphs` of `lm`; `height` is what it uses.
@@ -184,7 +224,7 @@ public enum PDFRenderer {
     /// Lays out note text in the given area: the part that fits, and the rest (empty when everything fits).
     static func fitNotes(_ text: NSAttributedString, width: CGFloat, height: CGFloat) -> (notes: Notes?, rest: NSAttributedString) {
         guard text.length > 0, height > 1 else { return (nil, text) }
-        let storage = NSTextStorage(attributedString: text)
+        let storage = NSTextStorage(attributedString: TextLayerFonts.fixed(text))
         let lm = NSLayoutManager()
         lm.usesFontLeading = true
         storage.addLayoutManager(lm)
@@ -212,6 +252,30 @@ public enum PDFRenderer {
         lm.addTextContainer(tc)
         lm.ensureLayout(for: tc)
         return ceil(lm.usedRect(for: tc).height)
+    }
+
+    /// TextKit 1 gets slower than linear when one text storage holds a very long text: a 1.6 MB text took 9 s and a
+    /// 16 MB one did not finish (WD-34). Text past `limit` characters is laid out in pieces of about `piece`
+    /// characters, cut after a paragraph end; shorter text stays one piece and lays out exactly as before.
+    static func chunks(_ s: NSAttributedString, limit: Int = 200_000, piece: Int = 100_000) -> [NSAttributedString] {
+        guard s.length > limit else { return [s] }
+        let ns = s.string as NSString
+        var out: [NSAttributedString] = []
+        var start = 0
+        while start < ns.length {
+            var end = min(ns.length, start + piece)
+            if end < ns.length {
+                let para = ns.paragraphRange(for: NSRange(location: end, length: 0))
+                end = max(NSMaxRange(para), end)
+                // Never inside a table: its cells must stay in one storage.
+                while end < ns.length, (s.attribute(.paragraphStyle, at: end - 1, effectiveRange: nil) as? NSParagraphStyle)?.textBlocks.isEmpty == false {
+                    end = NSMaxRange(ns.paragraphRange(for: NSRange(location: end, length: 0)))
+                }
+            }
+            out.append(s.attributedSubstring(from: NSRange(location: start, length: end - start)))
+            start = end
+        }
+        return out
     }
 
     /// Splits at paragraphs carrying `.ensoPageBreak`.

@@ -1,15 +1,17 @@
 {
- "version": "1.0.8",
+ "version": "1.0.9",
  "date": "2026-11-13",
  "download": "https://marudoc.app/MaruDoc.dmg",
  "page": "https://marudoc.app/update/",
  "notes": [
-  "PowerPoint to PDF now draws the slides. Each slide is one page at the slide's own size, with its background, shapes, pictures, tables, charts and SmartArt, and the text can still be selected and searched. In 1.0.7 the text and pictures were poured onto A4 pages.",
-  "Excel to PDF now prints the sheet as Excel would: column widths, merged cells, fonts, fills, borders, number formats, charts and pictures, the file's own print settings, and a header row repeated on each page. A wide sheet is turned sideways or shrunk to fit instead of being cut into narrow columns.",
-  "CSV to PDF prints a plain grid with columns sized to their contents and numbers aligned right. A 50,000-row file that took over two minutes now takes a few seconds.",
-  "Excel to Word keeps the sheet's column proportions, merged cells, bold, fills and number alignment, and a title above the table stays a title.",
-  "PowerPoint to image gives one image per slide.",
-  "Excel fraction formats such as 2 3/4 and Japanese era dates such as 令和1年5月1日 are shown as Excel shows them.",
-  "The PowerPoint menu item is now \"Convert to PDF\"."
+  "Word to PDF now has headers, footers and page numbers, including \"Page 1 / 3\" and a different first page.",
+  "Landscape pages in a Word document come out landscape, and each section keeps its own paper size and margins.",
+  "Headings, line spacing, paragraph spacing, indents and margins follow the Word document. In 1.0.8 headings were enlarged and the spacing was fixed, which added pages.",
+  "Layouts built with tab stops, such as arrow diagrams and tables of contents with dot leaders, stay aligned.",
+  "EMF pictures in Word documents, such as organisation charts, are drawn instead of being left out, and pictures placed side by side stay side by side.",
+  "Boxed paragraphs and text boxes keep their frames.",
+  "Text set in MS Gothic no longer comes out in a hairline weight that looked grey, in PDFs and in the Word editor.",
+  "Dashes and similar characters (—, –, −, 〜) copy correctly from PDFs made from Word, Markdown, HTML and text files.",
+  "Very large text files convert to PDF in seconds instead of minutes."
  ]
 }

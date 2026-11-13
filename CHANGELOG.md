@@ -2,6 +2,18 @@
 
 The newest version comes first. scripts/site_release.py reads this file to build marudoc.app/update/ and the version line on the site, and scripts/ship.sh uses the newest entry as the GitHub release notes. Keep the format: `## <version> (<yyyy-mm-dd>)`, then one line per change starting with `- `.
 
+## 1.0.9 (2026-11-13)
+
+- Word to PDF now has headers, footers and page numbers, including "Page 1 / 3" and a different first page.
+- Landscape pages in a Word document come out landscape, and each section keeps its own paper size and margins.
+- Headings, line spacing, paragraph spacing, indents and margins follow the Word document. In 1.0.8 headings were enlarged and the spacing was fixed, which added pages.
+- Layouts built with tab stops, such as arrow diagrams and tables of contents with dot leaders, stay aligned.
+- EMF pictures in Word documents, such as organisation charts, are drawn instead of being left out, and pictures placed side by side stay side by side.
+- Boxed paragraphs and text boxes keep their frames.
+- Text set in MS Gothic no longer comes out in a hairline weight that looked grey, in PDFs and in the Word editor.
+- Dashes and similar characters (—, –, −, 〜) copy correctly from PDFs made from Word, Markdown, HTML and text files.
+- Very large text files convert to PDF in seconds instead of minutes.
+
 ## 1.0.8 (2026-11-13)
 
 - PowerPoint to PDF now draws the slides. Each slide is one page at the slide's own size, with its background, shapes, pictures, tables, charts and SmartArt, and the text can still be selected and searched. In 1.0.7 the text and pictures were poured onto A4 pages.

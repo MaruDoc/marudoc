@@ -52,7 +52,7 @@ struct DocxRunProps {
     }
 }
 
-private struct DocxStyle {
+struct DocxStyle {
     var type = "paragraph"
     var name = ""
     var basedOn: String?
@@ -62,17 +62,19 @@ private struct DocxStyle {
     var run = DocxRunProps()
     var pageBreakBefore: Bool?
     var alignment: DocAlignment?
+    /// Spacing, indents and tabs (page layout only; see DocxLayoutReader.swift).
+    var para = DocxParaProps()
 }
 
 /// One level of a numbering definition: number format, start value, level text ("%1.", "(%1)", "第%1条", or the bullet
 /// character), legal-style numbering (all levels decimal) and the bullet's font (symbol fonts are mapped to Unicode).
-private struct NumLevel { var format: String; var start: Int; var text: String? = nil; var legal = false; var font: String? = nil }
+struct NumLevel { var format: String; var start: Int; var text: String? = nil; var legal = false; var font: String? = nil; var para: DocxParaProps? = nil }
 
-private enum ParaKind { case heading(Int, title: Bool), code, quote, list(ordered: Bool, level: Int, numId: Int), plain }
+enum ParaKind { case heading(Int, title: Bool), code, quote, list(ordered: Bool, level: Int, numId: Int), plain }
 
 // MARK: - Parser
 
-private final class DocxParser {
+final class DocxParser {
     let zip: ZipReader
     var mainPart = "word/document.xml"
     var rels: [String: OPCRelationship] = [:]
@@ -90,8 +92,32 @@ private final class DocxParser {
     var blocks: [DocBlock] = []
     var pageSize: CGSize?
     var titleFromStyle: String?
-    /// Complex field state: one entry per open fldChar begin; `link` is set once the instruction is known.
-    var fieldStack: [(instr: String, inResult: Bool, link: String?)] = []
+    /// Complex field state: one entry per open fldChar begin; `link` is set once the instruction is known. `page`:
+    /// a page field in a header or footer, written as its DocField placeholder instead of its stored result.
+    var fieldStack: [(instr: String, inResult: Bool, link: String?, page: Bool)] = []
+
+    // Page layout (DocxLayoutReader.swift): only the PDF renderer uses it.
+    var defaultsPara = DocxParaProps()
+    var paraCache: [String: DocxParaProps] = [:]
+    var layoutSections: [DocSection] = []
+    /// Section the body paragraph being read belongs to; set at each section break.
+    var sectionIndex = 0
+    var sectionBoundaryPending = false
+    var sectionStarts: [Int] = [0]
+    var readingHeaderFooter = false
+    /// Formats of empty body paragraphs waiting for the next paragraph (DocParagraphFormat.emptyBefore).
+    var pendingEmpty: [DocParagraphFormat] = []
+    /// > 0 while reading table cells or text boxes, whose empty paragraphs are not body blank lines.
+    var nestedDepth = 0
+    /// Height (points) of a floating text box or picture just read. Its content is placed in the text flow, so the
+    /// blank lines Word kept free under it are not added again.
+    var floatingReserve: Double = 0
+    /// Counts framed text boxes, so that two boxes in a row stay two boxes (DocBorders.group).
+    var boxGroup = 0
+    /// Counts paragraphs read, so that the inline pictures of one paragraph share a DocImagePlacement group.
+    var paragraphSerial = 0
+    var defaultTabStop: Double = 36
+    var evenAndOddHeaders = false
 
     /// Footnote and endnote parts: note id -> its w:footnote / w:endnote element, and the part's own relationships
     /// (links inside a note resolve against them, not against the body's).
@@ -146,10 +172,19 @@ private final class DocxParser {
         let doc = try XNode.parse(try zip.data(mainPart), part: mainPart)
         guard doc.tag == "w:document" else { throw OfficeError.invalidDocument("\(mainPart) is not a Word document") }
         guard let body = doc.child("w:body") else { return DocModel() }
-        for child in blockChildren(body) { readBlock(child, into: &blocks) }
+        let sectNodes = sectionNodes(body)
+        readLayoutSettings(relList)
+        layoutSections = sectNodes.map { sectionGeometry($0) }
+        for child in blockChildren(body) {
+            readBlock(child, into: &blocks)
+            // The paragraph that closes a section has just been read: the next block starts the next one.
+            if sectionBoundaryPending { sectionBoundaryPending = false; sectionStarts.append(blocks.count) }
+        }
 
-        return DocModel(title: OPC.coreTitle(zip) ?? titleFromStyle, blocks: blocks, pageSize: pageSize,
-                        bodyFontSize: bodySize, bodyFontName: bodyRun.font, notes: notes, bodyEastAsianFontName: bodyRun.eastAsiaFont)
+        var model = DocModel(title: OPC.coreTitle(zip) ?? titleFromStyle, blocks: blocks, pageSize: pageSize,
+                             bodyFontSize: bodySize, bodyFontName: bodyRun.font, notes: notes, bodyEastAsianFontName: bodyRun.eastAsiaFont)
+        model.pageLayout = finishLayout(sectNodes)
+        return model
     }
 
     // MARK: Styles, numbering, theme
@@ -168,6 +203,7 @@ private final class DocxParser {
 
     func parseStyles(_ root: XNode) {
         if let rPr = root.child("w:docDefaults")?.child("w:rPrDefault")?.child("w:rPr") { defaults = runProps(rPr) }
+        if let pPr = root.child("w:docDefaults")?.child("w:pPrDefault")?.child("w:pPr") { defaultsPara = DocxParaProps(pPr) }
         for s in root.children("w:style") {
             guard let id = s["w:styleId"] else { continue }
             var st = DocxStyle()
@@ -182,6 +218,7 @@ private final class DocxParser {
                 }
                 if let pb = pPr.child("w:pageBreakBefore") { st.pageBreakBefore = OOXMLValue.onOff(pb["w:val"]) }
                 st.alignment = alignment(pPr.child("w:jc")?["w:val"])
+                st.para = DocxParaProps(pPr)
             }
             if let rPr = s.child("w:rPr") { st.run = runProps(rPr) }
             let lname = st.name.lowercased()
@@ -206,7 +243,8 @@ private final class DocxParser {
                                         start: OOXMLValue.clamp(OOXMLValue.int(l.child("w:start")?["w:val"]) ?? 1, 0, 32767),
                                         text: l.child("w:lvlText")?["w:val"],
                                         legal: l.child("w:isLgl").map { OOXMLValue.onOff($0["w:val"]) } ?? false,
-                                        font: l.child("w:rPr")?.child("w:rFonts").flatMap { $0["w:ascii"] ?? $0["w:hAnsi"] })
+                                        font: l.child("w:rPr")?.child("w:rFonts").flatMap { $0["w:ascii"] ?? $0["w:hAnsi"] },
+                                        para: l.child("w:pPr").map { DocxParaProps($0) })
             }
             abstractNums[id] = (levels, a.child("w:numStyleLink")?["w:val"])
         }
@@ -240,7 +278,7 @@ private final class DocxParser {
     }
 
     /// Style chain from the given style up through basedOn (guarding against cycles).
-    private func chain(_ id: String) -> [DocxStyle] {
+    func chain(_ id: String) -> [DocxStyle] {
         var out: [DocxStyle] = []
         var cur: String? = id
         var seen = Set<String>()
@@ -392,7 +430,22 @@ private final class DocxParser {
         let base = paraRun.over(defaults)
 
         var pieces: [Piece] = []
+        let reserveBefore = floatingReserve
+        paragraphSerial += 1
+        let fieldsBefore = fieldStack
         collectInline(p, base: base, link: nil, into: &pieces)
+        // Headings keep their runs free of the style (other writers give headings their own look). The PDF lays them
+        // out with the style's character formatting, read in a second pass over the same content.
+        var styledPieces: [Piece]?
+        if case .heading = kind, let styleId {
+            let fieldsAfter = fieldStack
+            fieldStack = fieldsBefore
+            var again: [Piece] = []
+            collectInline(p, base: resolvedRun(style: styleId).over(defaults), link: nil, into: &again)
+            fieldStack = fieldsAfter
+            if again.count == pieces.count { styledPieces = again }
+        }
+        let format = paragraphFormat(pPr, styleId: styleId, kind: kind)
 
         let styleBreak = styleId.flatMap { chain($0).lazy.compactMap(\.pageBreakBefore).first } ?? false
         let directBreak = pPr?.child("w:pageBreakBefore").map { OOXMLValue.onOff($0["w:val"]) }
@@ -421,19 +474,33 @@ private final class DocxParser {
             case .pageBreak: return false
             }
         }
+        var isRule = false
         if !hasContent {
             if kind.isCode, case .code(let prev, let lang)? = out.last {
                 out[out.count - 1] = .code(prev + "\n", language: lang)
             } else if let bottom = pPr?.child("w:pBdr")?.child("w:bottom"), !["none", "nil"].contains(bottom["w:val"] ?? "none") {
                 out.append(.horizontalRule)
+                isRule = true
             }
         }
+        // An empty body paragraph is a blank line in Word: the PDF keeps its height (DocParagraphFormat.emptyBefore).
+        if !hasContent && !isRule && !kind.isCode && !readingNote && nestedDepth == 0 {
+            if floatingReserve > 0 { floatingReserve -= emptyParagraphHeight(format) } else { pendingEmpty.append(format) }
+        }
 
-        var runs: [DocRun] = []
+        var runs: [DocRun] = [], styledRuns: [DocRun] = []
         func flush() {
-            let para = DocParagraph(runs, alignment: align, indent: indent).normalized()
-            runs = []
+            var para = DocParagraph(runs, alignment: align, indent: indent).normalized()
+            let styled = styledRuns
+            runs = []; styledRuns = []
             guard !para.isEmpty || (kind.isCode && !para.runs.isEmpty) else { return }
+            var f = format
+            if styledPieces != nil { f.styledRuns = DocParagraph(styled).normalized().runs }
+            if !readingNote && nestedDepth == 0 {
+                f.emptyBefore = pendingEmpty; pendingEmpty = []
+                if floatingReserve == reserveBefore { floatingReserve = 0 }
+            }
+            para.format = f
             switch kind {
             case .heading(let lvl, let title):
                 if title && titleFromStyle == nil { titleFromStyle = para.plainText.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -451,11 +518,18 @@ private final class DocxParser {
         }
 
         var trailing: [DocBlock] = []
-        for piece in pieces {
+        for (i, piece) in pieces.enumerated() {
             switch piece {
-            case .run(let r): runs.append(r)
-            case .image(let img): flush(); out.append(.image(img))
-            case .pageBreak: flush(); appendPageBreak(&out)
+            case .run(let r):
+                runs.append(r)
+                if let sp = styledPieces, case .run(let s) = sp[i] { styledRuns.append(s) }
+            case .image(var img):
+                if img.placement != nil { img.placement?.alignment = align }
+                flush(); out.append(.image(img))
+                if !readingNote && nestedDepth == 0 { pendingEmpty = [] }
+            case .pageBreak:
+                // Text boxes anchored before the break stay on the page of their anchor.
+                flush(); out += trailing; trailing = []; appendPageBreak(&out)
             case .blocks(let b): trailing += b
             }
         }
@@ -465,10 +539,13 @@ private final class DocxParser {
         if let sect = pPr?.child("w:sectPr") {
             notePageSize(sect)
             if (sect.child("w:type")?["w:val"] ?? "nextPage") != "continuous" { appendPageBreak(&out) }
+            if !readingNote && !readingHeaderFooter { sectionBoundaryPending = true; sectionIndex += 1 }
         }
     }
 
     func appendPageBreak(_ out: inout [DocBlock]) {
+        // Blank lines before a break stay on the page that ends (where they take no visible room).
+        if !readingNote && nestedDepth == 0 { pendingEmpty = [] }
         guard let last = out.last else { return } // nothing before it: a break at the very top is meaningless
         if case .pageBreak = last { return }
         out.append(.pageBreak)
@@ -610,6 +687,11 @@ private final class DocxParser {
                 if let id = c["r:id"], let rel = rels[id] { target = rel.target }
                 collectInline(c, base: base, link: target ?? link, into: &pieces)
             case "w:fldSimple":
+                if readingHeaderFooter, let token = DocxParser.pageFieldToken(c["w:instr"] ?? "") {
+                    let rPr = c.child("w:r")?.child("w:rPr").map { runProps($0).over(base) } ?? base
+                    pieces.append(.run(makeRun(String(token), rPr, link: nil)))
+                    continue
+                }
                 collectInline(c, base: base, link: DocxParser.hyperlinkTarget(c["w:instr"] ?? "") ?? link, into: &pieces)
             case "w:smartTag", "w:customXml", "w:ins", "w:moveTo", "w:bdo", "w:dir":
                 collectInline(c, base: base, link: link, into: &pieces)
@@ -690,6 +772,7 @@ private final class DocxParser {
             switch c.tag {
             case "w:t":
                 if fieldStack.last.map({ !$0.inResult }) ?? false { continue }
+                if fieldStack.contains(where: { $0.page }) { continue }
                 text += c.text
             case "w:tab", "w:ptab": text += "\t"
             case "w:br":
@@ -699,6 +782,7 @@ private final class DocxParser {
             case "w:noBreakHyphen": text += "\u{2011}"
             case "w:sym":
                 if fieldStack.last.map({ !$0.inResult }) ?? false { continue }
+                if fieldStack.contains(where: { $0.page }) { continue }
                 text += DocxSymbols.symbol(c["w:char"], font: c["w:font"] ?? props.font)
             case "w:ruby":
                 emitText()
@@ -711,14 +795,24 @@ private final class DocxParser {
             case "w:fldChar":
                 emitText()
                 switch c["w:fldCharType"] {
-                case "begin": fieldStack.append(("", false, nil))
+                case "begin": fieldStack.append(("", false, nil, false))
                 case "separate":
                     if var top = fieldStack.popLast() {
                         top.inResult = true
                         top.link = DocxParser.hyperlinkTarget(top.instr)
+                        // A page number in a header or footer: the placeholder, not the number stored in the file.
+                        if readingHeaderFooter, let token = DocxParser.pageFieldToken(top.instr) {
+                            top.page = true
+                            text = String(token)
+                            emitText()
+                        }
                         fieldStack.append(top)
                     }
-                case "end": _ = fieldStack.popLast()
+                case "end":
+                    if let top = fieldStack.popLast(), !top.inResult, readingHeaderFooter, let token = DocxParser.pageFieldToken(top.instr) {
+                        text = String(token)
+                        emitText()
+                    }
                 default: break
                 }
                 currentLink = link ?? fieldLink
@@ -765,7 +859,7 @@ private final class DocxParser {
     /// superscript mark run that points to it. nil when the note does not exist, is hidden, or the mark sits inside
     /// another note.
     private func noteReference(_ ref: XNode, kind: DocNote.Kind, props: DocxRunProps, link: String?) -> DocRun? {
-        guard !readingNote, props.hidden != true, let id = ref["w:id"], let part = noteParts[kind], let node = part.notes[id] else { return nil }
+        guard !readingNote, !readingHeaderFooter, props.hidden != true, let id = ref["w:id"], let part = noteParts[kind], let node = part.notes[id] else { return nil }
         let key = "\(kind.rawValue):\(id)"
         let note: DocNote
         if let known = noteIDs[key], let existing = notes.first(where: { $0.id == known }) {
@@ -854,12 +948,32 @@ private final class DocxParser {
                 } else {
                     w = OOXMLValue.double(extent?["cx"]).map { $0 / 12700 }; h = OOXMLValue.double(extent?["cy"]).map { $0 / 12700 }
                 }
-                if let img = image(rel: embed, width: w, height: h, alt: alt ?? pic.firstDescendant("pic:cNvPr")?["descr"]) {
+                if var img = image(rel: embed, width: w, height: h, alt: alt ?? pic.firstDescendant("pic:cNvPr")?["descr"]) {
+                    // Inline pictures of one body paragraph share a line in the PDF (page layout only).
+                    if holder.tag == "wp:inline", !readingNote, !readingHeaderFooter, nestedDepth == 0 {
+                        img.placement = DocImagePlacement(group: paragraphSerial, alignment: .left)
+                    }
                     pieces.append(.image(img))
                 }
             }
             // Text boxes (wps:txbx / v:textbox) carry their own paragraphs.
-            for box in holder.descendants("w:txbxContent") { pieces.append(.blocks(textBoxBlocks(box))) }
+            let boxes = holder.descendants("w:txbxContent")
+            let boxAlign = holder.child("wp:positionH")?.child("wp:align")?.text
+            // A text box shape draws its outline around its text (page layout only; the blocks are the same).
+            var outlines: [ObjectIdentifier: DocBorders.Edge] = [:]
+            for sh in holder.descendants("wps:wsp") {
+                guard let e = DocxParser.textBoxOutline(sh) else { continue }
+                for box in sh.descendants("w:txbxContent") { outlines[ObjectIdentifier(box)] = e }
+            }
+            for box in boxes {
+                pieces.append(.blocks(framed(alignedForHeader(textBoxBlocks(box), boxAlign), outlines[ObjectIdentifier(box)])))
+            }
+            // Linked text boxes (wps:linkedTxbx) continue the first box's text, which is already in the flow.
+            let linked = !holder.descendants("wps:linkedTxbx").isEmpty
+            if holder.tag == "wp:anchor", !pics.isEmpty || !boxes.isEmpty || linked, !readingNote, nestedDepth == 0,
+               let h = OOXMLValue.double(extent?["cy"]).map({ $0 / 12700 }), h > 0, h < 5000 {
+                floatingReserve = max(floatingReserve, h)
+            }
         }
     }
 
@@ -872,10 +986,27 @@ private final class DocxParser {
                 }
             }
         }
-        for box in n.descendants("w:txbxContent") { pieces.append(.blocks(textBoxBlocks(box))) }
+        let vmlAlign = n.descendants("v:shape").lazy.compactMap { DocxParser.vmlHorizontalAlign($0["style"] ?? "") }.first
+        var outlines: [ObjectIdentifier: DocBorders.Edge] = [:]
+        for tag in ["v:shape", "v:rect", "v:roundrect", "v:oval"] {
+            for shape in n.descendants(tag) {
+                guard let e = DocxParser.vmlOutline(shape) else { continue }
+                for box in shape.descendants("w:txbxContent") { outlines[ObjectIdentifier(box)] = e }
+            }
+        }
+        for box in n.descendants("w:txbxContent") {
+            pieces.append(.blocks(framed(alignedForHeader(textBoxBlocks(box), vmlAlign), outlines[ObjectIdentifier(box)])))
+        }
+        if !readingNote, nestedDepth == 0 {
+            for shape in n.descendants("v:shape") where (shape["style"] ?? "").contains("position:absolute") {
+                if let size = DocxParser.vmlSize(shape["style"] ?? ""), size.height < 5000 { floatingReserve = max(floatingReserve, Double(size.height)) }
+            }
+        }
     }
 
     private func textBoxBlocks(_ box: XNode) -> [DocBlock] {
+        nestedDepth += 1
+        defer { nestedDepth -= 1 }
         var out: [DocBlock] = []
         for c in blockChildren(box) { readBlock(c, into: &out) }
         return out
@@ -900,12 +1031,19 @@ private final class DocxParser {
 
     private func image(rel id: String, width: Double?, height: Double?, alt: String?) -> DocImage? {
         guard let rel = rels[id], !rel.external, let data = try? zip.data(rel.target) else { return nil }
+        // EMF, which macOS cannot decode, is played by EMFPlayer (DocxLayoutReader.swift).
         return OfficeImage.docImage(from: data, widthPt: width, heightPt: height, alt: alt)
+            ?? DocxParser.metafileImage(data, widthPt: width, heightPt: height, alt: alt)
     }
 
     // MARK: Tables
 
     func readTable(_ tbl: XNode) -> DocTable? {
+        // Blank lines before a body table go with its first cell (DocParagraphFormat.emptyBefore), not past it.
+        var blanksBefore: [DocParagraphFormat] = []
+        if nestedDepth == 0 && !readingNote { blanksBefore = pendingEmpty; pendingEmpty = [] }
+        nestedDepth += 1
+        defer { nestedDepth -= 1 }
         var rows: [[DocTableCell]] = []
         var headerRows = 0
         var stillHeader = true
@@ -952,6 +1090,10 @@ private final class DocxParser {
             if !runs.isEmpty && runs.allSatisfy(\.bold) { headerRows = 1 }
         }
         let colCount = rows.map { $0.reduce(0) { $0 + $1.colSpan } }.max() ?? 0
+        if !blanksBefore.isEmpty, !rows[0].isEmpty, !rows[0][0].paragraphs.isEmpty, var f = rows[0][0].paragraphs[0].format {
+            f.emptyBefore = blanksBefore
+            rows[0][0].paragraphs[0].format = f
+        }
         return DocTable(rows: rows, headerRows: headerRows, columnWidths: grid.count == colCount && grid.allSatisfy { $0 > 0 } ? grid : nil)
     }
 
