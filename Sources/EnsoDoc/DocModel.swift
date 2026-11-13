@@ -215,6 +215,8 @@ public struct DocTableCell: Hashable, Sendable {
     /// Rows this cell covers (vertical merge). The cells it covers in the rows below stay in `rows` as empty
     /// placeholders, so writers that cannot merge vertically show them as empty cells.
     public var rowSpan: Int
+    /// Background colour of the cell (spreadsheet fills); nil = none. Writers without cell shading ignore it.
+    public var fill: DocColor? = nil
     public init(_ paragraphs: [DocParagraph], colSpan: Int = 1, rowSpan: Int = 1) {
         self.paragraphs = paragraphs; self.colSpan = colSpan; self.rowSpan = rowSpan
     }

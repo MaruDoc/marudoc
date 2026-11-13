@@ -90,11 +90,24 @@ struct Converter {
             let out = OutputNamer.file(for: file, ext: "xlsx")
             try Formats.writeXlsx(Workbook(sheets: [sheet]), to: out)
             return [out]
+        case (.spreadsheet, "pdf"), (.csv, "pdf"):
+            return [try sheetPDF(file, kind: kind, cancelled: cancelled)]
+        case (.spreadsheet, "docx"):
+            return [try sheetDocx(file)]
         case (.spreadsheet, _), (.csv, _):
             let wb: Workbook = kind == .csv ? Workbook(sheets: [try Formats.readCSV(file)]) : try Formats.readXlsx(file)
             guard wb.sheets.contains(where: { !$0.rows.isEmpty }) else { throw EngineError.failed(L("表や文字が見つかりませんでした")) }
             let model = DocumentReader.model(from: wb, title: file.deletingPathExtension().lastPathComponent)
             return try await write(model, near: file, as: target)
+
+
+        // Presentations as slides: one page (or image) per visible slide.
+        case (.presentation, "pdf"):
+            let out = OutputNamer.file(for: file, ext: "pdf")
+            try Formats.slidesPDF(file, progress: progress, cancelled: cancelled).write(to: out, options: .atomic)
+            return [out]
+        case (.presentation, let t) where Self.imageTargets.contains(t):
+            return [try Formats.slideImages(file, format: t, dpi: options.imageDPI, progress: progress, cancelled: cancelled)]
 
         // Documents
         case (.word, _), (.rtf, _), (.markdown, _), (.text, _), (.html, _), (.presentation, _):

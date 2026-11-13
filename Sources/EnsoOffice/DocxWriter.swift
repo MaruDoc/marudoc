@@ -501,7 +501,7 @@ private final class DocxBuilder {
                 let span = min(max(cell.colSpan, 1), n - col)
                 let vMerge = spans.covered[ri][ci] ? "continue" : (spans.rowSpan[ri][ci] > 1 ? "restart" : nil)
                 s += tableCell(spans.covered[ri][ci] ? [] : cell.paragraphs, width: widths[col..<(col + span)].reduce(0, +), span: span,
-                               header: isHeader, vMerge: vMerge)
+                               header: isHeader, vMerge: vMerge, fill: cell.fill)
                 col += span
             }
             while col < n {
@@ -513,11 +513,13 @@ private final class DocxBuilder {
         return s + "</w:tbl>"
     }
 
-    private func tableCell(_ paragraphs: [DocParagraph], width: Int, span: Int, header: Bool, vMerge: String? = nil) -> String {
+    private func tableCell(_ paragraphs: [DocParagraph], width: Int, span: Int, header: Bool, vMerge: String? = nil, fill: DocColor? = nil) -> String {
         var s = "<w:tc><w:tcPr><w:tcW w:w=\"\(width)\" w:type=\"dxa\"/>"
         if span > 1 { s += "<w:gridSpan w:val=\"\(span)\"/>" }
         if let vMerge { s += vMerge == "restart" ? "<w:vMerge w:val=\"restart\"/>" : "<w:vMerge/>" }
-        if header { s += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F2F2F2\"/>" }
+        // The cell's own fill (from a spreadsheet) wins over the grey header shading.
+        if let fill { s += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"\(fill.hex)\"/>" }
+        else if header { s += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F2F2F2\"/>" }
         s += "</w:tcPr>"
         let spacing = "<w:spacing w:before=\"40\" w:after=\"40\" w:line=\"240\" w:lineRule=\"auto\"/>"
         let paras = paragraphs.isEmpty ? [DocParagraph([])] : paragraphs

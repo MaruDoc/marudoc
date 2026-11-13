@@ -1,20 +1,15 @@
 {
- "version": "1.0.7",
- "date": "2026-11-12",
+ "version": "1.0.8",
+ "date": "2026-11-13",
  "download": "https://marudoc.app/MaruDoc.dmg",
  "page": "https://marudoc.app/update/",
  "notes": [
-  "Footnotes and endnotes in Word documents are now kept in every conversion. PDFs put footnotes at the bottom of the page, and Word output has real footnotes.",
-  "Text with ruby (furigana) no longer loses its base characters. HTML and Word keep the ruby; other formats show the reading in parentheses.",
-  "Superscript and subscript are kept, for example 10⁵ and H₂O, from Word and HTML.",
-  "Equations in Word documents are written as one-line text instead of disappearing, and symbol characters such as check marks are converted to the matching characters.",
-  "List markers such as (1), ①, I., a) and 第1条 are kept instead of becoming 1. 2. 3.",
-  "Pictures inside table cells stay in their cells, merged cells stay merged, and an HTML table with merged rows no longer shifts the next row.",
-  "Every page break in a Word document starts a new page in the PDF, and documents set in MS Mincho or Century print in a Mincho typeface.",
-  "Markdown handles line breaks in table cells, inline HTML, HTML blocks, task lists, footnotes and column alignment, and no longer prints front matter as text.",
-  "An HTML page with an embedded frame no longer loses the text after it.",
-  "Text files in EUC-JP, UTF-16 without a byte-order mark and ISO-2022-JP are recognised, also in the built-in text editor.",
-  "Links in PDFs are blue and underlined, and quotes stay readable when the Mac is in Dark Mode.",
-  "An Excel file with nothing visible to convert now says so instead of writing an empty file."
+  "PowerPoint to PDF now draws the slides. Each slide is one page at the slide's own size, with its background, shapes, pictures, tables, charts and SmartArt, and the text can still be selected and searched. In 1.0.7 the text and pictures were poured onto A4 pages.",
+  "Excel to PDF now prints the sheet as Excel would: column widths, merged cells, fonts, fills, borders, number formats, charts and pictures, the file's own print settings, and a header row repeated on each page. A wide sheet is turned sideways or shrunk to fit instead of being cut into narrow columns.",
+  "CSV to PDF prints a plain grid with columns sized to their contents and numbers aligned right. A 50,000-row file that took over two minutes now takes a few seconds.",
+  "Excel to Word keeps the sheet's column proportions, merged cells, bold, fills and number alignment, and a title above the table stays a title.",
+  "PowerPoint to image gives one image per slide.",
+  "Excel fraction formats such as 2 3/4 and Japanese era dates such as 令和1年5月1日 are shown as Excel shows them.",
+  "The PowerPoint menu item is now \"Convert to PDF\"."
  ]
 }

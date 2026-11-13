@@ -105,7 +105,7 @@ public enum XlsxReader {
     /// Built-in formats (ECMA-376 18.8.30) that do not depend on the locale. 37-40 are written without Excel's
     /// trailing alignment space ("#,##0 ;(#,##0)"), which would only add a blank to every printed value.
     static let builtinCodes: [Int: String] = [
-        1: "0", 2: "0.00", 3: "#,##0", 4: "#,##0.00", 9: "0%", 10: "0.00%", 11: "0.00E+00",
+        1: "0", 2: "0.00", 3: "#,##0", 4: "#,##0.00", 9: "0%", 10: "0.00%", 11: "0.00E+00", 12: "# ?/?", 13: "# ??/??",
         37: "#,##0_);(#,##0)", 38: "#,##0_);[Red](#,##0)", 39: "#,##0.00_);(#,##0.00)", 40: "#,##0.00_);[Red](#,##0.00)",
     ]
 
@@ -161,7 +161,7 @@ public enum XlsxReader {
         let l = s.lowercased().replacingOccurrences(of: "am/pm", with: "").replacingOccurrences(of: "a/p", with: "")
         if l.contains("general") || l == "@" { return nil }
         let hasTime = l.contains("h") || l.contains("s")
-        let hasDate = l.contains("y") || l.contains("d") || (l.contains("m") && !hasTime)
+        let hasDate = l.contains("y") || l.contains("d") || l.contains("g") || (l.contains("m") && !hasTime)
         if hasDate && hasTime { return .dateTime }
         if hasDate { return .date }
         if hasTime { return elapsed ? .elapsed : .time }
@@ -449,9 +449,10 @@ public enum XlsxReader {
 /// Excel.
 /// Dates and times (renderDate): y yy yyyy, m mm mmm mmmm mmmmm, d dd ddd dddd, aaa aaaa (日 / 日曜日), h hh,
 /// m mm (minutes after h or before s), s ss with .0-.000 fractions, AM/PM and A/P, [h] [m] [s] elapsed time.
-/// Not supported, so the caller falls back to General (numbers) or yyyy-MM-dd (dates): fractions (# ?/?),
-/// conditions ([>=100]), [DBNum] numerals, engineering notation (##0.0E+0), Japanese era years (g, e), Buddhist
-/// years (b), system date tags ([$-F800]) and month or weekday names under a non-English locale tag.
+/// Fractions (# ?/?, # ??/??, # ?/4) and Japanese eras (g gg ggg, e ee) are supported too.
+/// Not supported, so the caller falls back to General (numbers) or yyyy-MM-dd (dates): conditions ([>=100]),
+/// [DBNum] numerals, engineering notation (##0.0E+0), Buddhist years (b), system date tags ([$-F800]) and month or
+/// weekday names under a non-English locale tag.
 enum ExcelNumberFormat {
 
     /// Splits a format code into its sections at ";" outside quotes, escapes and brackets.
@@ -554,8 +555,76 @@ enum ExcelNumberFormat {
         case 2: section = value < 0 ? secs[1] : secs[0]
         default: section = value > 0 ? secs[0] : (value < 0 ? secs[1] : secs[2])
         }
+        if let body = renderFraction(abs(value), section) { return secs.count == 1 && value < 0 ? "-" + body : body }
         guard let toks = tokens(section), let body = renderSection(abs(value), toks) else { return nil }
         return secs.count == 1 && value < 0 ? "-" + body : body
+    }
+
+    /// Fraction formats: "# ?/?", "# ??/??", "?/?" (improper), "# ?/4" or "0 ??/16" (fixed denominator). The whole part
+    /// shows when the format has one; the fraction is the closest one whose denominator has at most as many digits
+    /// as its placeholders. Excel's alignment padding is left out ("2 3/4", "3/4", "2"). nil when not a fraction.
+    static func renderFraction(_ a: Double, _ section: String) -> String? {
+        enum T { case lit(String), ph(Character), slash, fixed(Int) }
+        var toks: [T] = []
+        let c = Array(section)
+        var i = 0
+        while i < c.count {
+            let ch = c[i]
+            switch ch {
+            case "\"": var lit = ""; i += 1; while i < c.count, c[i] != "\"" { lit.append(c[i]); i += 1 }; toks.append(.lit(lit))
+            case "\\": if i + 1 < c.count { toks.append(.lit(String(c[i + 1]))); i += 1 }
+            case "_", "*": i += 1
+            case "[":
+                var tag = ""; i += 1
+                while i < c.count, c[i] != "]" { tag.append(c[i]); i += 1 }
+                if tag.hasPrefix("$") { toks.append(.lit(String(tag.dropFirst().prefix { $0 != "-" }))) } else if !isColor(tag) { return nil }
+            case "/":
+                toks.append(.slash)
+                var digits = ""
+                while i + 1 < c.count, c[i + 1].isNumber, digits.isEmpty ? c[i + 1] != "0" : true { digits.append(c[i + 1]); i += 1 }
+                if let d = Int(digits), d > 0 { toks.append(.fixed(d)) }
+            case "0", "#", "?": toks.append(.ph(ch))
+            default:
+                if ch.isLetter && ch.isASCII { return nil }
+                toks.append(.lit(String(ch)))
+            }
+            i += 1
+        }
+        guard let slash = toks.firstIndex(where: { if case .slash = $0 { return true }; return false }) else { return nil }
+        func isPh(_ k: Int) -> Bool { if k >= 0, k < toks.count, case .ph = toks[k] { return true }; return false }
+        var numStart = slash
+        while isPh(numStart - 1) { numStart -= 1 }
+        guard numStart < slash else { return nil }
+        var denEnd = slash + 1, denDigits = 0, fixed: Int?
+        if denEnd < toks.count, case .fixed(let d) = toks[denEnd] { fixed = d; denEnd += 1 } else {
+            while isPh(denEnd) { denDigits += 1; denEnd += 1 }
+            guard denDigits > 0, denDigits <= 4 else { return nil }
+        }
+        let wholePh = toks[..<numStart].compactMap { t -> Character? in if case .ph(let p) = t { return p }; return nil }
+        let whole = !wholePh.isEmpty
+        var w = whole ? a.rounded(.down) : 0
+        let f = a - w
+        var num = 0, den = 1
+        if let fixed { num = Int((f * Double(fixed)).rounded()); den = fixed } else {
+            var best = Double.infinity
+            for d in 1...(Int(pow(10, Double(denDigits))) - 1) {
+                let n = (f * Double(d)).rounded()
+                let err = abs(f - n / Double(d))
+                if err < best - 1e-12 { best = err; num = Int(n); den = d }
+            }
+        }
+        if whole && num == den { w += 1; num = 0 }
+        guard w < 1e15 else { return nil }
+        var lead = "", mid = "", tail = ""
+        for (k, t) in toks.enumerated() {
+            guard case .lit(let s) = t else { continue }
+            if k < numStart { if wholePh.isEmpty || toks[..<k].contains(where: { if case .ph = $0 { return true }; return false }) { mid += s } else { lead += s } }
+            else if k >= denEnd { tail += s }
+        }
+        if wholePh.isEmpty { lead += mid; mid = "" }
+        let wholeText = whole && (w != 0 || num == 0 || wholePh.contains("0")) ? String(Int64(w)) : ""
+        let fraction = num != 0 || !whole ? "\(num)/\(den)" : ""
+        return lead + wholeText + (!wholeText.isEmpty && !fraction.isEmpty ? mid : "") + fraction + tail
     }
 
     private static func renderSection(_ magnitude: Double, _ toks: [Token]) -> String? {
@@ -727,12 +796,24 @@ enum ExcelNumberFormat {
     // MARK: Dates
 
     private enum DatePart {
-        case literal(String), year(Int), monthOrMinute(Int), month(Int), minute(Int), day(Int), weekdayJa(Int)
+        case literal(String), year(Int), monthOrMinute(Int), month(Int), minute(Int), day(Int), weekdayJa(Int), era(Int), eraYear(Int)
         case hour(Int), second(Int), fraction(Int), ampm(upper: Bool, short: Bool), elapsed(Character, Int)
         var isCode: Bool { if case .literal = self { return false }; return true }
         var isSeconds: Bool {
             switch self { case .second, .elapsed("s", _): return true; default: return false }
         }
+    }
+
+    /// Era name, its Latin initial and the year in the era for a Gregorian date, from Foundation's Japanese calendar.
+    static func japaneseEra(_ y: Int, _ m: Int, _ d: Int) -> (name: String, initial: String, year: Int)? {
+        var greg = Calendar(identifier: .gregorian), jp = Calendar(identifier: .japanese)
+        greg.timeZone = TimeZone(identifier: "GMT")!; jp.timeZone = greg.timeZone
+        guard let date = greg.date(from: DateComponents(year: y, month: m, day: d)), let year = jp.dateComponents([.year], from: date).year else { return nil }
+        let f = DateFormatter()
+        f.calendar = jp; f.timeZone = jp.timeZone; f.locale = Locale(identifier: "ja_JP")
+        f.dateFormat = "GGGG"; let name = f.string(from: date)
+        f.dateFormat = "GGGGG"; let initial = f.string(from: date)
+        return name.isEmpty ? nil : (name, initial, year)
     }
 
     /// The text for a date/time serial in a custom date format, or nil when the format is not supported.
@@ -800,8 +881,10 @@ enum ExcelNumberFormat {
                 } else {
                     parts.append(.literal(".")); i += 1
                 }
-            case "g", "e", "b", "r", "0", "#", "?", "@", "%":
-                return nil // era years, Buddhist years, numbers mixed into a date
+            case "g": let n = run("g"); parts.append(.era(n)); i += n
+            case "e": let n = run("e"); parts.append(.eraYear(n)); i += n
+            case "b", "r", "0", "#", "?", "@", "%":
+                return nil // Buddhist years, numbers mixed into a date
             default:
                 parts.append(.literal(String(ch))); i += 1
             }
@@ -871,6 +954,13 @@ enum ExcelNumberFormat {
                 default: out += dayNames[weekday]
                 }
             case .weekdayJa(let n): out += dayNamesJa[weekday] + (n >= 4 ? "曜日" : "")
+            case .era(let n):
+                // g: R / H / S, gg: 令 / 平 / 昭, ggg: 令和 / 平成 / 昭和 (Foundation's Japanese calendar).
+                guard let e = japaneseEra(y, mo, d) else { return nil }
+                out += n == 1 ? e.initial : (n == 2 ? String(e.name.prefix(1)) : e.name)
+            case .eraYear(let n):
+                guard let e = japaneseEra(y, mo, d) else { return nil }
+                out += pad(e.year, min(n, 2))
             case .hour(let n): out += pad(twelveHour ? (hour % 12 == 0 ? 12 : hour % 12) : hour, min(n, 2))
             case .second(let n): out += pad(second, min(n, 2))
             case .fraction(let n): out += "." + String(format: "%0\(n)d", fraction)

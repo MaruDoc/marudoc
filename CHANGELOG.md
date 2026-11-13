@@ -2,6 +2,16 @@
 
 The newest version comes first. scripts/site_release.py reads this file to build marudoc.app/update/ and the version line on the site, and scripts/ship.sh uses the newest entry as the GitHub release notes. Keep the format: `## <version> (<yyyy-mm-dd>)`, then one line per change starting with `- `.
 
+## 1.0.8 (2026-11-13)
+
+- PowerPoint to PDF now draws the slides. Each slide is one page at the slide's own size, with its background, shapes, pictures, tables, charts and SmartArt, and the text can still be selected and searched. In 1.0.7 the text and pictures were poured onto A4 pages.
+- Excel to PDF now prints the sheet as Excel would: column widths, merged cells, fonts, fills, borders, number formats, charts and pictures, the file's own print settings, and a header row repeated on each page. A wide sheet is turned sideways or shrunk to fit instead of being cut into narrow columns.
+- CSV to PDF prints a plain grid with columns sized to their contents and numbers aligned right. A 50,000-row file that took over two minutes now takes a few seconds.
+- Excel to Word keeps the sheet's column proportions, merged cells, bold, fills and number alignment, and a title above the table stays a title.
+- PowerPoint to image gives one image per slide.
+- Excel fraction formats such as 2 3/4 and Japanese era dates such as 令和1年5月1日 are shown as Excel shows them.
+- The PowerPoint menu item is now "Convert to PDF".
+
 ## 1.0.7 (2026-11-12)
 
 - Footnotes and endnotes in Word documents are now kept in every conversion. PDFs put footnotes at the bottom of the page, and Word output has real footnotes.

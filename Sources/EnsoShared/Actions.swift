@@ -266,7 +266,7 @@ public enum ActionCatalog {
 
     static func presentationMenu() -> [MenuNode] {
         [
-            .leaf(Act.toPDF, L("PDF に変換 (テキストと画像)"), short: "PDF", symbol: "doc.text"),
+            .leaf(Act.toPDF, L("PDF に変換"), short: "PDF", symbol: "doc.text"),
             .leaf(Act.toDOCX, L("Word に変換"), short: "Word", symbol: "doc.richtext"),
             .leaf(Act.toMD, L("Markdown に変換"), short: "Markdown", symbol: "number.square"),
             .leaf(Act.toTXT, L("テキストに変換"), short: L("テキスト"), symbol: "doc.plaintext"),

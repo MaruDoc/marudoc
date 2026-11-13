@@ -131,7 +131,7 @@ extension SelfTest {
                     let out = r.outputs[0]
                     let text: String
                     switch out.pathExtension {
-                    case "pdf": text = pdfText(out)
+                    case "pdf": text = pdfText(out).filter { !$0.isWhitespace }   // slides wrap text inside their boxes
                     case "docx": text = textutil(out)
                     default: text = (try? String(contentsOf: out, encoding: .utf8)) ?? ""
                     }
